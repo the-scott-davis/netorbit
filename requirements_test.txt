@@ -1,0 +1,2 @@
+pytest-homeassistant-custom-component
+icmplib>=3.0.3

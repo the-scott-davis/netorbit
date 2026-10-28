@@ -1,0 +1,7 @@
+{
+  "services": {
+    "track_device": { "service": "mdi:map-marker-plus" },
+    "ignore_device": { "service": "mdi:eye-off" },
+    "scan_now": { "service": "mdi:radar" }
+  }
+}

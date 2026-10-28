@@ -1,0 +1,47 @@
+track_device:
+  fields:
+    mac:
+      example: "02:00:00:00:00:01"
+      selector:
+        text:
+    ip:
+      example: "10.0.0.50"
+      selector:
+        text:
+    name:
+      selector:
+        text:
+    icon:
+      selector:
+        icon:
+    hub:
+      example: "gateway"
+      selector:
+        text:
+    sleepy:
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: netorbit
+
+ignore_device:
+  fields:
+    mac:
+      selector:
+        text:
+    ip:
+      selector:
+        text:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: netorbit
+
+scan_now:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: netorbit

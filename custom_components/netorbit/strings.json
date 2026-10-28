@@ -1,0 +1,194 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up NetOrbit",
+        "description": "Pick the network to map. NetOrbit pings devices on this subnet and reads Home Assistant's ARP table to learn their MAC addresses.",
+        "data": {
+          "subnet": "Subnet",
+          "gateway": "Router IP",
+          "mode": "Tracking mode",
+          "ping_interval": "Ping interval"
+        },
+        "data_description": {
+          "subnet": "In CIDR form, for example 10.0.0.0/24. Up to 1024 hosts.",
+          "gateway": "Your router. It becomes the center of the map.",
+          "mode": "Automatic tracks everything it finds. Manual only tracks devices you add and lists the rest as new.",
+          "ping_interval": "How often tracked devices are pinged."
+        }
+      }
+    },
+    "error": {
+      "invalid_subnet": "That is not a valid IPv4 subnet.",
+      "subnet_too_large": "That subnet is too large. Use /22 or smaller.",
+      "invalid_ip": "That is not a valid IP address.",
+      "gateway_outside": "The router IP has to be inside the subnet."
+    },
+    "abort": {
+      "already_configured": "This subnet is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "NetOrbit",
+        "menu_options": {
+          "settings": "Settings",
+          "add_hub": "Add a hub (switch, access point, mesh node)",
+          "edit_hub": "Edit or remove a hub",
+          "add_device": "Track a device",
+          "edit_device": "Edit or stop tracking a device",
+          "review_new": "Review new devices"
+        }
+      },
+      "settings": {
+        "title": "Settings",
+        "data": {
+          "mode": "Tracking mode",
+          "ping_interval": "Ping interval",
+          "discovery_interval": "Discovery scan interval",
+          "stale_hours": "Mark as not seen after",
+          "ignore_random_mac": "Ignore randomized (private) MAC addresses"
+        },
+        "data_description": {
+          "discovery_interval": "How often the whole subnet is swept for new devices.",
+          "stale_hours": "A device that has not answered for this long turns red and fires a netorbit_device_stale event.",
+          "ignore_random_mac": "Phones and laptops often use a private address per network. Leave this on to keep them off the map."
+        }
+      },
+      "add_hub": {
+        "title": "Add a hub",
+        "description": "Hubs are the things devices connect through. Devices you assign to a hub are drawn around it.",
+        "data": {
+          "name": "Name",
+          "host": "IP address (optional)",
+          "type": "Type",
+          "parent": "Connected to"
+        },
+        "data_description": {
+          "host": "Leave empty for unmanaged switches with no IP. Hubs with an IP are pinged like devices."
+        }
+      },
+      "edit_hub": {
+        "title": "Edit a hub",
+        "data": { "hub": "Hub" }
+      },
+      "edit_hub_details": {
+        "title": "Edit {hub}",
+        "data": {
+          "name": "Name",
+          "host": "IP address (optional)",
+          "type": "Type",
+          "parent": "Connected to",
+          "remove": "Remove this hub"
+        }
+      },
+      "add_device": {
+        "title": "Track a device",
+        "description": "Pick something NetOrbit has already found, or enter an IP address.",
+        "data": {
+          "device": "Found on the network",
+          "host": "IP address",
+          "name": "Name (optional)",
+          "icon": "Icon (optional)",
+          "hub": "Connected through",
+          "sleepy": "Allowed to sleep (never fires a stale event)"
+        }
+      },
+      "edit_device": {
+        "title": "Edit a device",
+        "data": { "device": "Device" }
+      },
+      "edit_device_details": {
+        "title": "Edit {device}",
+        "description": "Current IP: {ip}",
+        "data": {
+          "name": "Name (empty uses the discovered name)",
+          "icon": "Icon (empty picks one automatically)",
+          "hub": "Connected through",
+          "sleepy": "Allowed to sleep (never fires a stale event)",
+          "stop_tracking": "Stop tracking and ignore this device"
+        }
+      },
+      "review_new": {
+        "title": "New devices",
+        "description": "Devices seen on the network that are not tracked yet.",
+        "data": {
+          "track": "Start tracking",
+          "ignore": "Ignore"
+        }
+      }
+    },
+    "error": {
+      "invalid_ip": "That is not a valid IP address.",
+      "hub_cycle": "A hub cannot be connected through itself.",
+      "pick_or_ip": "Pick a device or enter a valid IP address."
+    },
+    "abort": {
+      "no_devices": "No devices are being tracked yet.",
+      "no_new_devices": "There are no new devices right now."
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "auto": "Automatic: track everything found",
+        "manual": "Manual: only devices I add"
+      }
+    },
+    "hub_type": {
+      "options": {
+        "router": "Router",
+        "switch": "Switch",
+        "access_point": "Access point",
+        "mesh_node": "Mesh node",
+        "other": "Other"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "node": {
+        "state": {
+          "online": "Online",
+          "recent": "Seen recently",
+          "stale": "Not seen"
+        }
+      },
+      "summary": {
+        "name": "Devices online"
+      }
+    }
+  },
+  "services": {
+    "track_device": {
+      "name": "Track device",
+      "description": "Start tracking a device by MAC or IP address.",
+      "fields": {
+        "mac": { "name": "MAC address", "description": "MAC address of the device." },
+        "ip": { "name": "IP address", "description": "IP address, used when the MAC is unknown." },
+        "name": { "name": "Name", "description": "Name to show on the map." },
+        "icon": { "name": "Icon", "description": "Icon to show on the map." },
+        "hub": { "name": "Hub", "description": "Hub id the device connects through." },
+        "sleepy": { "name": "Allowed to sleep", "description": "Never fire a stale event for this device." },
+        "config_entry_id": { "name": "Config entry", "description": "Only needed if you have more than one NetOrbit entry." }
+      }
+    },
+    "ignore_device": {
+      "name": "Ignore device",
+      "description": "Stop tracking a device and hide it from new device lists.",
+      "fields": {
+        "mac": { "name": "MAC address", "description": "MAC address of the device." },
+        "ip": { "name": "IP address", "description": "IP address of the device." },
+        "config_entry_id": { "name": "Config entry", "description": "Only needed if you have more than one NetOrbit entry." }
+      }
+    },
+    "scan_now": {
+      "name": "Scan now",
+      "description": "Sweep the subnet for new devices right away.",
+      "fields": {
+        "config_entry_id": { "name": "Config entry", "description": "Only needed if you have more than one NetOrbit entry." }
+      }
+    }
+  }
+}

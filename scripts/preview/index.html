@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Preview the card with fake data: serve the repo root, then open
+     /scripts/preview/index.html?s=full  (or s=mesh, s=flat) -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>NetOrbit preview</title>
+<style>body { margin:0; background:#111318; padding:24px; max-width:960px; }</style>
+<script>
+  // Stand-ins for Home Assistant's elements. Icons come from @mdi/js when available.
+  window.MDI = {};
+  customElements.define("ha-icon", class extends HTMLElement {
+    connectedCallback() {
+      const name = this.getAttribute("icon") || "";
+      const key = "mdi" + name.slice(4).split("-").map((p) => p[0].toUpperCase() + p.slice(1)).join("");
+      const path = window.MDI[key] || "";
+      this.innerHTML = `<svg viewBox="0 0 24 24" style="width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);display:block;fill:currentColor"><path d="${path}"/></svg>`;
+      this.style.display = "inline-flex";
+    }
+  });
+  customElements.define("ha-card", class extends HTMLElement {
+    connectedCallback() { this.style.display = "block"; this.style.borderRadius = "12px"; }
+  });
+</script>
+<script src="scenarios.js"></script>
+<script src="../../custom_components/netorbit/frontend/netorbit-card.js"></script>
+</head>
+<body>
+<div id="c"></div>
+<script type="module">
+  try { Object.assign(window.MDI, await import("https://cdn.jsdelivr.net/npm/@mdi/js@7.4.47/mdi.js")); } catch (e) {}
+  try { Object.assign(window.MDI, await import("/scripts/preview/mdi.js")); } catch (e) {}
+  const s = new URLSearchParams(location.search).get("s") || "full";
+  const card = document.createElement("netorbit-card");
+  card.setConfig({ title: "Home Network" });
+  document.getElementById("c").appendChild(card);
+  card.hass = { states: window.NETORBIT_SCENARIOS[s], entities: {}, user: { is_admin: true }, callService: async () => {} };
+  window.ready = true;
+</script>
+</body>
+</html>

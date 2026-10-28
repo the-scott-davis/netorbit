@@ -1,0 +1,26 @@
+{
+  "domain": "netorbit",
+  "name": "NetOrbit",
+  "codeowners": [
+    "@the-scott-davis"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "http",
+    "network"
+  ],
+  "after_dependencies": [
+    "frontend"
+  ],
+  "documentation": "https://github.com/the-scott-davis/netorbit",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/the-scott-davis/netorbit/issues",
+  "loggers": [
+    "icmplib"
+  ],
+  "requirements": [
+    "icmplib>=3.0.3"
+  ],
+  "version": "0.1.0"
+}

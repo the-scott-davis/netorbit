@@ -1,0 +1,25 @@
+blueprint:
+  name: NetOrbit - notify when a new device joins
+  description: Sends a notification when NetOrbit finds a device it has never seen before.
+  domain: automation
+  source_url: https://github.com/the-scott-davis/netorbit/blob/main/blueprints/automation/netorbit/new_device_notify.yaml
+  input:
+    notify_device:
+      name: Phone to notify
+      selector:
+        device:
+          integration: mobile_app
+
+mode: queued
+max: 25
+
+triggers:
+  - trigger: event
+    event_type: netorbit_new_device
+
+actions:
+  - domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: New device on the network
+    message: "{{ trigger.event.data.name }} at {{ trigger.event.data.ip }} ({{ trigger.event.data.mac }})"
