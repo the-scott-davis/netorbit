@@ -115,6 +115,7 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
             "vendor": node.vendor,
             "placement": node.placement if node.kind == "device" else None,
             "hub_source": node.hub_source,
+            "ip_changes": node.ip_changes,
         }
 
     @callback

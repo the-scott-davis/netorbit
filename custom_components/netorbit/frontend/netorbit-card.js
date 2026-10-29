@@ -104,9 +104,44 @@ function netorbitLayout(model, opts) {
     const [a0, a1] = range[h];
     const a = (angle(a0) + angle(a1)) / 2;
     const r = hubs[h].kind === "group" ? o.rGroup : Math.min(o.rHubMax, o.rHub1 + (depth[h] - 1) * hubStep);
-    pos[h] = { x: o.cx + r * Math.cos(a), y: o.cy + r * Math.sin(a), a, depth: depth[h] };
+    pos[h] = { x: o.cx + r * Math.cos(a), y: o.cy + r * Math.sin(a), a, r, depth: depth[h] };
   });
+  netorbitSpreadHubs(pos, Object.keys(hubs).filter((h) => h !== root && pos[h]), o);
   return { pos, slots, N, arc: (Math.PI * 2 * o.rDev) / N, kidsHub, depth };
+}
+
+/** Push apart hubs that ended up on top of each other, keeping them between the router and the device ring. */
+function netorbitSpreadHubs(pos, keys, o) {
+  const minD = 74;
+  const rMin = 105, rMax = o.rDev - 60;
+  for (let iter = 0; iter < 120; iter++) {
+    let moved = false;
+    for (let i = 0; i < keys.length; i++) {
+      for (let j = i + 1; j < keys.length; j++) {
+        const p = pos[keys[i]], q = pos[keys[j]];
+        const d = Math.hypot(p.x - q.x, p.y - q.y);
+        if (d >= minD) continue;
+        moved = true;
+        if (Math.abs(p.r - q.r) < 30) {
+          // Same ring: open up the angle between them.
+          let da = q.a - p.a;
+          while (da > Math.PI) da -= 2 * Math.PI;
+          while (da < -Math.PI) da += 2 * Math.PI;
+          const need = (minD - d) / Math.max(p.r, 60) / 2 + 0.01;
+          const s = da >= 0 ? 1 : -1;
+          p.a -= s * need; q.a += s * need;
+          // On a crowded ring, also step one of them outward.
+          if (iter > 40) q.r = Math.min(rMax, q.r + 6);
+        } else {
+          const s = p.r < q.r ? -1 : 1;
+          p.r = Math.max(rMin, Math.min(rMax, p.r + s * 4));
+          q.r = Math.max(rMin, Math.min(rMax, q.r - s * 4));
+        }
+        for (const z of [p, q]) { z.x = o.cx + z.r * Math.cos(z.a); z.y = o.cy + z.r * Math.sin(z.a); }
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 const NO_PLACEMENT = {
@@ -187,9 +222,11 @@ class NetOrbitCard extends HTMLElement {
         sig.push(JSON.stringify([a.new_devices, a.suggested_hubs, a.group_by_type]));
         return;
       }
-      const icon = ((hass.entities || {})[s.entity_id] || {}).icon || a.icon || "mdi:lan-connect";
+      const reg = (hass.entities || {})[s.entity_id] || {};
+      const icon = reg.icon || a.icon || "mdi:lan-connect";
       const n = {
-        key: a.node_key, entity: s.entity_id, label: a.label || a.friendly_name, ip: a.ip, mac: a.mac,
+        // A name set in Home Assistant's entity settings wins over NetOrbit's own name.
+        key: a.node_key, entity: s.entity_id, label: reg.name || a.label || a.friendly_name, ip: a.ip, mac: a.mac, ip_changes: a.ip_changes || 0,
         kind: a.kind, link: a.link, parent: a.link, sleepy: a.sleepy === true, last_seen: a.last_seen,
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
         status: NO_STATUS[s.state] ? s.state : "unknown",
@@ -241,6 +278,27 @@ class NetOrbitCard extends HTMLElement {
           list.forEach((d) => (d.link = key));
         });
       }
+    }
+    // Very large networks: keep problem devices visible, fold the rest into "+N more" per hub.
+    const max = Number(cfg.max_devices) || 80;
+    if (devices.length > max) {
+      const rank = { stale: 0, recent: 1, new: 2, unknown: 3, online: 4 };
+      const byHub = {};
+      devices.forEach((d) => (byHub[d.link] = (byHub[d.link] || []).concat(d)));
+      const share = Math.max(3, Math.floor(max / Object.keys(byHub).length));
+      const kept = [];
+      Object.entries(byHub).forEach(([hub, list]) => {
+        list.sort((a, b) => (rank[a.status] - rank[b.status]) || String(a.label).localeCompare(String(b.label)));
+        if (list.length <= share) { kept.push(...list); return; }
+        const shown = list.slice(0, share - 1);
+        const rest = list.slice(share - 1);
+        kept.push(...shown, {
+          key: "more:" + hub, kind: "more", link: hub, label: `+${rest.length} more`, status: "online",
+          icon: "mdi:dots-horizontal-circle-outline", members: rest,
+        });
+      });
+      devices.length = 0;
+      devices.push(...kept);
     }
     return { hubs, devices, root, summary, suggestions, sig: sig.join("|") };
   }
@@ -335,7 +393,10 @@ class NetOrbitCard extends HTMLElement {
     });
 
     const counts = { online: 0, recent: 0, stale: 0, new: 0 };
-    devices.forEach((d) => { if (counts[d.status] !== undefined && !d.key.startsWith("sug:")) counts[d.status]++; });
+    devices.forEach((d) => {
+      if (d.kind === "more") { d.members.forEach((m) => { if (counts[m.status] !== undefined) counts[m.status]++; }); return; }
+      if (counts[d.status] !== undefined && !d.key.startsWith("sug:")) counts[d.status]++;
+    });
     const nSug = Object.keys(model.suggestions || {}).length;
     const chip = (k) => `<span class="chip"><i style="background:${NO_STATUS[k].color}"></i>${counts[k]} ${NO_STATUS[k].label}</span>`;
     const staleH = summary ? summary.attributes.stale_hours : 24;
@@ -390,6 +451,7 @@ class NetOrbitCard extends HTMLElement {
   .node.hub.hot .disc { stroke:#60a5fa !important; stroke-width:6; }
   .ghost { fill:rgba(96,165,250,.25); stroke:#60a5fa; stroke-width:2; pointer-events:none; }
   .tip { position:absolute; pointer-events:none; background:rgba(15,23,42,.96); border:1px solid rgba(148,163,184,.25); border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.55; color:#e2e8f0; min-width:190px; max-width:280px; box-shadow:0 10px 30px rgba(0,0,0,.45); opacity:0; transition:opacity .12s; z-index:2; }
+  .tiptip { margin-top:6px; padding-top:6px; border-top:1px solid rgba(148,163,184,.2); color:#93c5fd; }
   .tip b { font-size:13.5px; display:block; margin-bottom:2px; }
   .tip .k { color:#94a3b8; display:inline-block; width:74px; }
   .pop { position:absolute; background:rgba(15,23,42,.98); border:1px solid rgba(96,165,250,.45); border-radius:12px; padding:12px; font-size:13px; color:#e2e8f0; z-index:3; width:250px; box-shadow:0 10px 30px rgba(0,0,0,.5); }
@@ -401,6 +463,11 @@ class NetOrbitCard extends HTMLElement {
   .pop button { flex:1; font:inherit; padding:7px 10px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#1e293b; color:#e2e8f0; cursor:pointer; }
   .pop button.go { background:#2563eb; border-color:#2563eb; }
   .pop button.warn { border-color:rgba(248,113,113,.5); color:#fecaca; }
+  .mlist { max-height:240px; overflow:auto; margin-top:8px; }
+  .mrow { display:flex; align-items:center; gap:8px; padding:4px 2px; cursor:pointer; border-radius:6px; }
+  .mrow:hover { background:rgba(148,163,184,.1); }
+  .mrow i { width:8px; height:8px; border-radius:50%; flex:none; }
+  .mrow span { margin-left:auto; color:#94a3b8; font-size:12px; }
   .legend { display:flex; flex-wrap:wrap; gap:14px; padding:2px 18px 14px; font-size:12px; color:#94a3b8; }
   .legend span { display:inline-flex; align-items:center; gap:6px; }
   .legend .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
@@ -525,6 +592,7 @@ class NetOrbitCard extends HTMLElement {
         if (this._edit && n.kind === "device") return; // handled by pointer events
         if (n.suggested && this._isAdmin()) { this._suggestPopup(n, ev, wrap, place); return; }
         if (n.kind === "new") { this._newPopup(n, ev, wrap, place); return; }
+        if (n.kind === "more") { this._morePopup(n, ev, wrap, place); return; }
         if (this._edit && n.kind === "hub") { this._hubPopup(n, ev, wrap, place, n.key === root); return; }
         if (n.entity) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: n.entity }, bubbles: true, composed: true }));
       });
@@ -532,6 +600,11 @@ class NetOrbitCard extends HTMLElement {
   }
 
   _tipHtml(n, hubs, col) {
+    if (n.kind === "more") {
+      const counts = {};
+      n.members.forEach((m) => (counts[m.status] = (counts[m.status] || 0) + 1));
+      return `<b>${noEsc(n.label)}</b><div>${Object.entries(counts).map(([s, c]) => `${c} ${(NO_STATUS[s] || NO_STATUS.unknown).label.toLowerCase()}`).join(", ")}</div><div style="color:#94a3b8">Tap to list them. Devices with problems are always shown on the map.</div>`;
+    }
     if (n.kind === "newhub") return `<b>New devices</b><div>Found on the network but not tracked yet, plus anything that might be a hub. Tap one to decide.</div>`;
     if (n.kind === "group") return `<b>${noEsc(n.label)}</b><div>NetOrbit does not know which access point or switch these use yet. Use Edit layout, the NetOrbit settings, or an AI assistant to place them.</div>`;
     const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
@@ -544,7 +617,19 @@ class NetOrbitCard extends HTMLElement {
       (n.hostname && n.hostname !== n.label ? `<div><span class="k">Host</span>${noEsc(n.hostname)}</div>` : "") +
       (via ? `<div><span class="k">Via</span>${noEsc(via)}</div>` : "") +
       (n.kind === "device" && n.placement ? `<div><span class="k">Placed</span>${noEsc(NO_PLACEMENT[n.placement] || n.placement)}</div>` : "") +
-      `<div><span class="k">Last seen</span>${n.status === "online" ? "now" : noRel(n.last_seen)}</div>`;
+      `<div><span class="k">Last seen</span>${n.status === "online" ? "now" : noRel(n.last_seen)}</div>` +
+      this._dhcpTip(n);
+  }
+
+  _dhcpTip(n) {
+    const c = n.ip_changes || 0;
+    if (n.kind === "hub" && c >= 1) {
+      return `<div class="tiptip">Its IP has changed ${c} time${c > 1 ? "s" : ""}. NetOrbit follows it by MAC address, but network gear works best with a DHCP reservation in your router.</div>`;
+    }
+    if (n.kind === "device" && c >= 2) {
+      return `<div class="tiptip">Its IP has changed ${c} times. NetOrbit keeps your settings by MAC address, so nothing is lost. A DHCP reservation keeps the address steady if other things rely on it.</div>`;
+    }
+    return "";
   }
 
   _ref(n) {
@@ -648,6 +733,16 @@ class NetOrbitCard extends HTMLElement {
     const q = (s) => pop.querySelector(s);
     if (q(".track")) q(".track").addEventListener("click", () => { this._closePop(wrap); this._call("track_device", { mac: n.raw.mac || undefined, ip: n.raw.ip || undefined }); });
     if (q(".ign")) q(".ign").addEventListener("click", () => { this._closePop(wrap); this._call("ignore_device", { mac: n.raw.mac || undefined, ip: n.raw.ip || undefined }); });
+  }
+
+  _morePopup(n, ev, wrap, place) {
+    const rows = n.members.map((m) => `<div class="mrow" data-e="${noEsc(m.entity || "")}"><i style="background:${(NO_STATUS[m.status] || NO_STATUS.unknown).color}"></i>${noEsc(m.label)}<span>${noEsc(m.ip || "")}</span></div>`).join("");
+    const pop = this._openPop(`<b>${noEsc(n.label)}</b><div class="mlist">${rows}</div><div class="row"><button class="x">Close</button></div>`, ev, wrap, place, 260, 340);
+    pop.querySelectorAll(".mrow[data-e]").forEach((r) => r.addEventListener("click", () => {
+      if (!r.dataset.e) return;
+      this._closePop(wrap);
+      this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: r.dataset.e }, bubbles: true, composed: true }));
+    }));
   }
 
   _summaryEntry() {

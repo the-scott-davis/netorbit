@@ -226,6 +226,59 @@ async def update_device(
     return {"device": name or _name(coord, key)}
 
 
+EXPORT_VERSION = 1
+
+
+def export_config(coord: NetOrbitCoordinator) -> dict[str, Any]:
+    """Everything a person has set up, keyed by MAC, so it can be backed up or moved."""
+    opts = coord.opts
+    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at")
+    return {
+        "netorbit_export": EXPORT_VERSION,
+        "hubs": [
+            {k: h.get(k) for k in ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source") if h.get(k) is not None}
+            for h in opts[CONF_HUBS]
+        ],
+        "devices": {key: {k: v for k, v in cfg.items() if k in keep} for key, cfg in opts[CONF_DEVICES].items()},
+        "ignored": list(opts[CONF_IGNORED]),
+        "dismissed_hubs": list(opts.get("dismissed_hubs", [])),
+    }
+
+
+async def import_config(hass, entry, coord, data: dict[str, Any], replace: bool = False) -> dict[str, Any]:
+    """Restore an export. By default it merges: imported settings win, nothing else is removed."""
+    if not isinstance(data, dict) or data.get("netorbit_export") != EXPORT_VERSION:
+        raise ActionError("That is not a NetOrbit export")
+    opts = _opts(coord)
+    hubs = {h["id"]: h for h in ([] if replace else opts[CONF_HUBS])}
+    for h in data.get("hubs", []):
+        if not isinstance(h, dict) or not h.get("id"):
+            continue
+        hubs[h["id"]] = {**hubs.get(h["id"], {}), **h}
+    if ROOT_HUB_ID not in hubs:
+        hubs[ROOT_HUB_ID] = next(x for x in opts[CONF_HUBS] if x["id"] == ROOT_HUB_ID)
+    hubs[ROOT_HUB_ID]["parent"] = None
+    ids = set(hubs)
+    for h in hubs.values():
+        if h["id"] != ROOT_HUB_ID and (h.get("parent") not in ids or manage.creates_cycle(list(hubs.values()), h["id"], h.get("parent") or ROOT_HUB_ID)):
+            h["parent"] = ROOT_HUB_ID
+    opts[CONF_HUBS] = [hubs[ROOT_HUB_ID], *[h for k, h in hubs.items() if k != ROOT_HUB_ID]]
+    devices = {} if replace else opts[CONF_DEVICES]
+    for key, cfg in (data.get("devices") or {}).items():
+        mac = normalize_mac(key)
+        key = mac or str(key)
+        if isinstance(cfg, dict):
+            if cfg.get("hub") and cfg["hub"] not in ids:
+                cfg = {k: v for k, v in cfg.items() if k != "hub"}
+            devices[key] = {**devices.get(key, {}), **cfg}
+    opts[CONF_DEVICES] = devices
+    for field in (CONF_IGNORED, "dismissed_hubs"):
+        merged = list(dict.fromkeys([*([] if replace else opts.get(field, [])), *(data.get(field) or [])]))
+        opts[field] = merged
+    await _save(hass, entry, coord, opts)
+    return {"hubs": len(opts[CONF_HUBS]), "devices": len(devices)}
+
+
 async def track(hass, entry, coord, mac: str | None = None, ip: str | None = None, **fields: Any) -> dict[str, Any]:
     key = coord.find_key(mac, ip)
     if key is None or key not in (coord._seen):  # noqa: SLF001

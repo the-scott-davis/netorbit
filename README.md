@@ -79,6 +79,22 @@ Under the integration's **Configure** menu:
 
 **Allowed to sleep** is for TVs, consoles and anything else that's off a lot. They still show their status but never fire the stale event.
 
+### DHCP, MAC addresses and keeping your setup
+
+Most homes hand out addresses with DHCP, so a device's IP can change at any time. NetOrbit is built for that:
+
+- **Everything is keyed by MAC address.** Names, icons, hub placement, "allowed to sleep" and history all follow the device's MAC, so a new IP changes nothing. When a device's IP changes, NetOrbit just pings the new one.
+- **Hubs follow their MAC too.** If an access point gets a new IP, NetOrbit notices on the next sweep and updates it.
+- **Devices added by IP switch to their MAC** as soon as NetOrbit sees them on the network, so they survive the next DHCP change as well.
+- **Renaming works either way.** Rename in NetOrbit's settings, from an AI assistant, or in Home Assistant's own entity settings; the map uses whichever name you set.
+- **Back up your setup.** `netorbit.export_config` returns every name, icon, hub and placement, keyed by MAC. `netorbit.import_config` restores it (merging by default), for example after reinstalling.
+
+Tips for the tidiest map:
+
+- **Give network gear a DHCP reservation** (sometimes called a static lease or address reservation) in your router: switches, access points and mesh nodes. NetOrbit copes without it, but reserved addresses keep everything else that talks to them happy too. Hovering a hub whose IP has changed shows this tip.
+- **Reserve addresses for devices other things depend on**, like printers, NAS boxes, cameras and Home Assistant itself. Hovering a device whose IP keeps changing shows a reminder.
+- **Phones and laptops** usually use a private (randomized) MAC address per network. NetOrbit hides those by default. Turn off *Ignore randomized MAC addresses* if you want them: on current phones the private address normally stays the same for your network unless the phone is set to rotate it.
+
 ### SNMP
 
 SNMP is how managed switches share their MAC address tables. NetOrbit only ever reads (it never changes anything), and it asks each device on your network once an hour whether it speaks SNMP.
@@ -97,6 +113,7 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `show_legend` | `true` | Show the legend at the bottom. |
 | `group_by_type` | `true` | Group unplaced devices by type. |
 | `hide_sleepy_offline` | `false` | Hide sleep-allowed devices while they're offline. |
+| `max_devices` | `80` | Above this many devices, each hub shows its problem devices first and folds the rest into a "+N more" bubble. |
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 
 Hover a device for details, tap it for its history. Admins get an **Edit layout** button.
@@ -125,6 +142,8 @@ Every service returns a response describing what it did. Devices can be given by
 | `netorbit.confirm_hub` | `device`, `type`, `name` |
 | `netorbit.dismiss_hub` | `device` |
 | `netorbit.track_device` | `mac` or `ip`, `name`, `icon`, `hub`, `sleepy` |
+| `netorbit.export_config` | none (returns your settings, keyed by MAC) |
+| `netorbit.import_config` | `data` (an export), `replace` |
 | `netorbit.ignore_device` | `device` or `mac` or `ip` |
 | `netorbit.scan_now` | none |
 
@@ -140,6 +159,7 @@ Import either from **Settings > Automations & scenes > Blueprints > Import bluep
 - Home Assistant needs to be on the same network as your devices, with host networking. Home Assistant OS and supervised installs are. Docker installs need `network_mode: host`.
 - Presence is based on ping. Devices that block ping show as not seen even when connected. Mark them as allowed to sleep, or ignore them.
 - Phones and laptops often use a private MAC address per network. Those are ignored by default since they can change, and they roam between access points anyway.
+- If an access point and wired devices share one switch port through an unmanaged switch, the switch can't tell them apart, so those wired devices may be drawn under the access point. Move them by hand if it matters to you.
 - Placements from pasted lists are a snapshot. TVs, cameras and smart home gear stay put, so that's fine for them.
 - IPv4 only, up to 1024 hosts per entry. Add one entry per subnet if you have several.
 
@@ -163,6 +183,12 @@ node --test tests/card.test.js
 ```
 
 Preview the card with fake data: `npm i @mdi/js@7.4.47` and copy `node_modules/@mdi/js/mdi.js` to `scripts/preview/`, serve the repo root (`python -m http.server 8766`), and open `http://localhost:8766/scripts/preview/index.html?s=full` (or `mesh`, `flat`, `novice`). `scripts/preview/interact.js` drives edit mode in a real browser with Playwright.
+
+### The network simulator
+
+`tests/test_simulation.py` generates hundreds of home networks with a known true layout (flat routers, mesh with nothing reporting, UniFi, one or several managed switches, unmanaged switches in between, routers that speak SNMP, odd gateways, randomized MACs, devices that ignore ping, DHCP churn, aged-out MAC table entries, wrong SNMP communities, duplicate and non-ASCII names, up to several hundred devices) and runs the real integration against each one. It fails on crashes, duplicates, loops, devices placed on the wrong branch, manual placement not winning, state lost on restart, or real addresses in diagnostics. `pytest -s -k simulation` prints a report of how much it found and placed.
+
+To draw every simulated map in a browser and check for errors and overlaps: `NETORBIT_DUMP=scripts/preview/_simstates pytest -k simulation`, serve the repo root, then `node scripts/preview/fuzz.js`.
 
 ## License
 

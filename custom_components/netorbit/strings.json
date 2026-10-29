@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Set up NetOrbit",
-        "description": "Pick the network to map. NetOrbit pings devices on this subnet and reads Home Assistant's ARP table to learn their MAC addresses.",
+        "description": "Pick the network to map. NetOrbit pings devices on this subnet and reads Home Assistant's ARP table to learn their MAC addresses. Everything you set up is remembered by MAC address, so DHCP changing a device's IP is fine. For the tidiest map, give your router, switches and access points DHCP reservations.",
         "data": {
           "subnet": "Subnet",
           "gateway": "Router IP",
@@ -419,6 +419,34 @@
         "parent": {
           "name": "Connected to",
           "description": "Hub it connects to."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "export_config": {
+      "name": "Export settings",
+      "description": "Return every name, icon, hub and placement you have set, keyed by MAC address, so you can back it up.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "import_config": {
+      "name": "Import settings",
+      "description": "Restore settings from an export.",
+      "fields": {
+        "data": {
+          "name": "Export",
+          "description": "The response from Export settings."
+        },
+        "replace": {
+          "name": "Replace",
+          "description": "Replace everything instead of merging."
         },
         "config_entry_id": {
           "name": "Config entry",

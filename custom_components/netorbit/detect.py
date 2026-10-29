@@ -28,6 +28,7 @@ MESH_VENDORS = ("eero", "plume design")
 
 _AP_RE = re.compile(r"(^|[^a-z])(uap|u6|u7|eap\d*|wap|ap|access[- ]?point|ac-?lite|ac-?pro|nanohd|unifi-ap|ruckus)([^a-z]|$)")
 _SWITCH_RE = re.compile(r"(^|[^a-z])(usw|switch|sw\d*|sg\d+|gs\d+|poe|tl-sg)([^a-z]|$)")
+_SWITCH_MODEL_RE = re.compile(r"(^|[^a-z])(usw|sw\d+|sg\d+|gs\d+|tl-sg|poe|switch-?\d+)")
 _MESH_RE = re.compile(r"(deco|eero|orbi|satellite|google-?wifi|nest-?wifi|velop|mesh|amplifi|plume|superpod)")
 
 AUTO_SCORE = 3
@@ -114,8 +115,10 @@ def classify(ev: Evidence) -> Verdict:
 
     host_kind = _kind_from_text(ev.hostname or "")
     if host_kind:
-        score += 1
-        reasons.append(f"its name looks like a {host_kind.replace('_', ' ')}")
+        # "ap-3", "eap2" or "deco-office" are strong hints. "switch" is weak: people name light switches that way.
+        weak = host_kind == HUB_SWITCH and not _SWITCH_MODEL_RE.search((ev.hostname or "").lower())
+        score += 1 if weak else 2
+        reasons.append(f"its name looks like a{'n' if host_kind == HUB_AP else ''} {host_kind.replace('_', ' ')}")
         kind = kind or host_kind
 
     if any(v in vendor for v in NETWORK_VENDORS):
@@ -126,7 +129,7 @@ def classify(ev: Evidence) -> Verdict:
             kind = HUB_MESH
         kind = kind or HUB_AP
     elif any(v in vendor for v in MIXED_VENDORS) and host_kind:
-        score += 1
+        # Mixed makers also sell plugs and cameras, so this only explains a suggestion.
         reasons.append(f"made by {ev.vendor}")
 
     return Verdict(score=score, hub_type=kind, reasons=reasons)

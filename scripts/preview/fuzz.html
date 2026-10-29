@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- Draws one dumped state file: fuzz.html?f=<name>.json -->
+<html><head><meta charset="utf-8">
+<style>body { margin:0; background:#111318; padding:0; width:960px; }</style>
+<script>
+  customElements.define("ha-icon", class extends HTMLElement { connectedCallback() { this.innerHTML = "<svg viewBox='0 0 24 24' width='16' height='16'><circle cx='12' cy='12' r='8' fill='currentColor'/></svg>"; } });
+  customElements.define("ha-card", class extends HTMLElement { connectedCallback() { this.style.display = "block"; } });
+</script>
+<script src="../../custom_components/netorbit/frontend/netorbit-card.js"></script>
+</head><body><div id="c"></div>
+<script type="module">
+  const f = new URLSearchParams(location.search).get("f");
+  const states = await (await fetch("_simstates/" + f)).json();
+  const card = document.createElement("netorbit-card");
+  card.setConfig({ title: "Fuzz" });
+  document.getElementById("c").appendChild(card);
+  card.hass = { states, entities: {}, user: { is_admin: true }, callService: async () => {} };
+  window.ready = true;
+</script></body></html>

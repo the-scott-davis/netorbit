@@ -5,3 +5,4 @@ __pycache__/
 node_modules/
 scripts/preview/mdi.js
 .DS_Store
+scripts/preview/_simstates/

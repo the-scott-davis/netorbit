@@ -1,0 +1,365 @@
+"""Run NetOrbit against many generated networks and check it against the answer key.
+
+Hard failures (the test fails):
+* any exception or failed update,
+* a device shown twice, or shown as both a device and a hub,
+* a hub tree with a loop, or links to hubs that do not exist,
+* a device placed on the wrong branch of the network (placement must be the true hub,
+  an ancestor of it, or an access point sharing the same switch port; see below),
+* manual placement not winning,
+* real addresses or the SNMP community in diagnostics,
+* state lost across a restart.
+
+Measured and reported (pytest -s), not failed: exact placement rate, hubs found, timing.
+
+Known ambiguity: when an access point and wired devices share one port through an
+unmanaged switch, the switch table cannot tell them apart. Those devices may be shown
+under the access point. That is counted as "shared port", not as wrong.
+"""
+
+from __future__ import annotations
+
+import random
+import time
+from collections import Counter
+from datetime import timedelta
+
+import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+
+from custom_components.netorbit.const import DOMAIN
+from custom_components.netorbit.diagnostics import async_get_config_entry_diagnostics
+from custom_components.netorbit.snmp import ProbeResult
+
+from .sim.netgen import SHAPES, VENDORS, Network, random_network
+
+STATS: Counter = Counter()
+TIMES: list[tuple[str, int, float]] = []
+
+
+def _apply(fake_net, net: Network, rng: random.Random) -> None:
+    fake_net.alive = {n.ip for n in net.nodes.values() if n.ip and n.answers_ping}
+    fake_net.arp = {n.ip: n.mac for n in net.nodes.values() if n.ip and n.mac and n.ip != "0"}
+    fake_net.dns = {n.ip: f"{n.hostname}.lan" for n in net.nodes.values() if n.ip and n.hostname}
+    fake_net.vendors = {p.upper(): v for p, v in VENDORS.values() if v}
+    fake_net.snmp = {
+        n.ip: (n.snmp_community, ProbeResult(descr=f"{n.hostname or 'switch'} managed switch", name=n.hostname, bridge=True))
+        for n in net.nodes.values() if n.snmp_community and n.ip
+    }
+    fake_net.tables = net.mac_tables(rng)
+
+
+async def _controller(hass: HomeAssistant, net: Network) -> None:
+    """A UniFi-like integration: registry entries for APs and trackers reporting each client's AP."""
+    if net.controller != "unifi":
+        return
+    ctrl = MockConfigEntry(domain="unifi", title="UniFi")
+    ctrl.add_to_hass(hass)
+    reg = dr.async_get(hass)
+    for n in net.nodes.values():
+        if n.kind == "ap_unifi" and n.mac:
+            reg.async_get_or_create(config_entry_id=ctrl.entry_id, connections={(dr.CONNECTION_NETWORK_MAC, n.mac)},
+                                    name=n.hostname, model="U6-Lite", manufacturer="Ubiquiti")
+    for i, n in enumerate(net.devices()):
+        parent = net.nodes[n.parent]
+        if parent.kind == "ap_unifi" and n.wireless:
+            # UniFi reports the AP's own MAC. With a single AP, also exercise the radio-MAC fallback.
+            only_ap = sum(1 for x in net.nodes.values() if x.kind == "ap_unifi") == 1
+            ap_mac = parent.mac[:-2] + f"{(int(parent.mac[-2:], 16) + 3) % 256:02x}" if only_ap else parent.mac
+            hass.states.async_set(f"device_tracker.client_{i}", "home", {"mac": n.mac, "ap_mac": ap_mac})
+
+
+async def _run(hass: HomeAssistant, fake_net, net: Network, *, community_known: bool, seed: int) -> dict:
+    rng = random.Random(seed)
+    _apply(fake_net, net, rng)
+    await _controller(hass, net)
+    opts = {"mode": "auto", "ping_interval": 60, "discovery_interval": 300, "stale_hours": 24, "ignore_random_mac": True}
+    if community_known and net.community != "public":
+        opts["snmp_community"] = net.community
+    entry = MockConfigEntry(domain=DOMAIN, title="NetOrbit", unique_id=net.subnet,
+                            data={"subnet": net.subnet, "gateway": net.gateway}, options=opts)
+    entry.add_to_hass(hass)
+    t0 = time.perf_counter()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    TIMES.append((net.name, len(net.nodes), time.perf_counter() - t0))
+    assert coord.last_update_success, coord.last_exception
+    return {"entry": entry, "coord": coord}
+
+
+def _snapshot(hass: HomeAssistant) -> tuple[dict, dict]:
+    hubs, devices = {}, {}
+    for st in hass.states.async_all("sensor"):
+        a = st.attributes
+        if not a.get("netorbit") or a.get("kind") == "summary":
+            continue
+        (hubs if a["kind"] == "hub" else devices)[a["node_key"]] = st
+    return hubs, devices
+
+
+def _true_node(net: Network, mac: str | None, ip: str | None):
+    for n in net.nodes.values():
+        if (mac and n.mac and n.mac.upper() == mac.upper()) or (ip and n.ip == ip):
+            return n
+    return None
+
+
+def _dump(hass: HomeAssistant, label: str) -> None:
+    """Save the sensor states so the card can be drawn from them (NETORBIT_DUMP=<dir>)."""
+    import json, os  # noqa: E401, PLC0415
+
+    out = os.environ.get("NETORBIT_DUMP")
+    if not out:
+        return
+    states = {
+        s.entity_id: {"entity_id": s.entity_id, "state": s.state, "attributes": dict(s.attributes)}
+        for s in hass.states.async_all("sensor") if s.attributes.get("netorbit")
+    }
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, label.replace(" ", "_") + ".json"), "w", encoding="utf-8") as fh:
+        json.dump(states, fh, default=str)
+
+
+def _check(hass: HomeAssistant, entry, net: Network, *, snmp_ok: bool, label: str) -> None:
+    _dump(hass, label)
+    hubs, devices = _snapshot(hass)
+    coord = entry.runtime_data
+    assert coord.last_update_success
+
+    # Hub tree: one root (the router), every parent exists, no loops.
+    roots = [k for k, s in hubs.items() if s.attributes["link"] is None]
+    assert roots == ["hub:gateway"], f"{label}: roots {roots}"
+    assert hubs["hub:gateway"].attributes["ip"] == net.gateway
+    for k, s in hubs.items():
+        seen, cur = set(), k
+        while cur:
+            assert cur not in seen, f"{label}: hub loop at {k}"
+            seen.add(cur)
+            assert cur in hubs, f"{label}: {k} links to missing hub {cur}"
+            cur = hubs[cur].attributes["link"]
+
+    # Devices: valid link, no duplicates, never also a hub.
+    hub_macs = {s.attributes["mac"] for s in hubs.values() if s.attributes["mac"]}
+    hub_ips = {s.attributes["ip"] for s in hubs.values() if s.attributes["ip"]}
+    macs = Counter(s.attributes["mac"] for s in devices.values() if s.attributes["mac"])
+    assert not [m for m, c in macs.items() if c > 1], f"{label}: duplicate devices"
+    for s in devices.values():
+        a = s.attributes
+        assert a["link"] in hubs, f"{label}: {a['label']} links to {a['link']}"
+        assert a["mac"] not in hub_macs and a["ip"] not in hub_ips, f"{label}: {a['label']} is both a device and a hub"
+        assert s.state in ("online", "recent", "stale")
+
+    # Coverage: every real device with a stable MAC is on the map, as a device or (misdetected) as a hub.
+    shown = {s.attributes["mac"] for s in devices.values()} | hub_macs
+    for n in net.devices():
+        if n.ip and n.mac and not n.random_mac:
+            assert n.mac.upper() in shown, f"{label}: {n.hostname or n.mac} missing from the map"
+        if n.random_mac:
+            assert n.mac.upper() not in shown, f"{label}: randomized MAC shown"
+    for n in net.devices():
+        if n.mac and n.mac.upper() in hub_macs:
+            STATS["device_misdetected_as_hub"] += 1
+
+    # Hub detection rate (reported).
+    for n in net.hubs():
+        if n.kind == "router" or not n.ip:
+            continue
+        STATS["true_hubs"] += 1
+        if n.ip in hub_ips:
+            STATS["hubs_found"] += 1
+        elif any(s.get("ip") == n.ip for s in (coord.data.suggested_hubs if coord.data else [])):
+            STATS["hubs_suggested"] += 1
+        else:
+            why = f"{n.kind}/{n.vendor}/{'host' if n.hostname else 'nohost'}/{'snmp' if n.snmp_community else 'nosnmp'}"
+            if n.snmp_community and (snmp_ok or n.snmp_community == "public"):
+                why += "/SHOULD_HAVE_FOUND"
+            STATS["missed:" + why] += 1
+
+    # Placement soundness.
+    net_hub_by_key = {}
+    for k, s in hubs.items():
+        t = _true_node(net, s.attributes["mac"], s.attributes["ip"])
+        if t:
+            net_hub_by_key[k] = t
+    for s in devices.values():
+        a = s.attributes
+        t = _true_node(net, a["mac"], a["ip"])
+        if t is None:
+            continue
+        place = a["placement"]
+        STATS[f"placement_{place}"] += 1
+        if place in ("manual", "none"):
+            continue
+        guess = net_hub_by_key.get(a["link"])
+        assert guess is not None, f"{label}: placed on a hub with no real counterpart"
+        path = net.path_to_root(t.key)
+        if guess.key == t.parent:
+            STATS["placed_exact"] += 1
+        elif guess.key in path:
+            STATS["placed_ancestor"] += 1
+        else:
+            # Allowed only when the guess is an AP on the same switch port as the device.
+            shared = _same_port(net, guess.key, t.key)
+            assert shared, f"{label}: {t.hostname or t.mac} placed under {guess.key}, really under {t.parent}"
+            STATS["placed_shared_port"] += 1
+    if snmp_ok:
+        assert coord.data.sources and "snmp" in coord.data.sources or not _has_tables(net), f"{label}: SNMP not used"
+
+    # Diagnostics never carry real addresses or the community.
+    diag = repr(_run_sync_diag(hass, entry))
+    for n in list(net.nodes.values())[:50]:
+        if n.ip:
+            assert n.ip not in diag
+        if n.mac:
+            assert n.mac.lower() not in diag.lower()
+    if net.community != "public":
+        assert net.community not in diag
+
+
+def _has_tables(net: Network) -> bool:
+    return any(n.snmp_community for n in net.nodes.values())
+
+
+def _same_port(net: Network, a: str, b: str) -> bool:
+    """True when a and b hang off the same port of the nearest managed switch above them."""
+    def first_port(key: str):
+        path = net.path_to_root(key)
+        for i, k in enumerate(path[1:], 1):
+            if net.nodes[k].snmp_community:
+                return k, net.nodes[path[i - 1]].port_on_parent
+        return None
+    return first_port(a) is not None and first_port(a) == first_port(b)
+
+
+_DIAG: dict = {}
+
+
+def _run_sync_diag(hass, entry):
+    return _DIAG.get(entry.entry_id)
+
+
+async def _diag(hass, entry) -> None:
+    _DIAG[entry.entry_id] = await async_get_config_entry_diagnostics(hass, entry)
+
+
+async def _churn(hass: HomeAssistant, fake_net, freezer, net: Network, rng: random.Random) -> None:
+    """DHCP moves some IPs, a few devices leave, a new one arrives; then a sweep runs."""
+    devs = [n for n in net.devices() if n.ip]
+    used = {n.ip for n in net.nodes.values() if n.ip}
+    free = [h for h in _hosts(net.subnet) if h not in used and h != net.gateway]
+    rng.shuffle(free)
+    for n in rng.sample(devs, k=min(len(devs), max(1, len(devs) // 8))):
+        n.ip = free.pop()
+    for n in rng.sample(devs, k=min(len(devs), max(1, len(devs) // 10))):
+        n.answers_ping = False
+    _apply(fake_net, net, rng)
+    freezer.tick(timedelta(seconds=301))
+    async_fire_time_changed(hass)
+    for _ in range(3):
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+
+def _hosts(subnet: str) -> list[str]:
+    import ipaddress  # noqa: PLC0415
+
+    return [str(h) for h in ipaddress.ip_network(subnet).hosts()]
+
+
+# ----- the tests -------------------------------------------------------------------------
+
+@pytest.mark.parametrize("shape", sorted(SHAPES))
+async def test_named_shapes(hass: HomeAssistant, fake_net, freezer, shape: str) -> None:
+    rng = random.Random(hash(shape) & 0xFFFF)
+    net = SHAPES[shape](rng)
+    ctx = await _run(hass, fake_net, net, community_known=True, seed=1)
+    await _diag(hass, ctx["entry"])
+    _check(hass, ctx["entry"], net, snmp_ok=True, label=shape)
+    await _churn(hass, fake_net, freezer, net, rng)
+    await _diag(hass, ctx["entry"])
+    _check(hass, ctx["entry"], net, snmp_ok=True, label=f"{shape} after churn")
+
+
+@pytest.mark.parametrize("seed", range(150))
+async def test_random_networks(hass: HomeAssistant, fake_net, freezer, seed: int) -> None:
+    net = random_network(seed)
+    rng = random.Random(seed)
+    known = seed % 4 != 0  # a quarter of users never enter their SNMP community
+    ctx = await _run(hass, fake_net, net, community_known=known, seed=seed)
+    await _diag(hass, ctx["entry"])
+    _check(hass, ctx["entry"], net, snmp_ok=known or net.community == "public", label=net.name)
+    await _churn(hass, fake_net, freezer, net, rng)
+    await _diag(hass, ctx["entry"])
+    _check(hass, ctx["entry"], net, snmp_ok=known or net.community == "public", label=f"{net.name} after churn")
+
+
+@pytest.mark.parametrize("seed", range(20))
+async def test_manual_always_wins_and_survives_restart(hass: HomeAssistant, fake_net, seed: int) -> None:
+    net = random_network(1000 + seed)
+    ctx = await _run(hass, fake_net, net, community_known=True, seed=seed)
+    entry = ctx["entry"]
+    hubs, devices = _snapshot(hass)
+    if not devices:
+        return
+    rng = random.Random(seed)
+    targets = rng.sample(sorted(hubs), k=min(3, len(hubs)))
+    moved = {}
+    for dev_key in rng.sample(sorted(devices), k=min(5, len(devices))):
+        hub = rng.choice(targets)
+        await hass.services.async_call(DOMAIN, "assign_device", {"device": devices[dev_key].attributes["mac"], "hub": hub.removeprefix("hub:")}, blocking=True)
+        moved[devices[dev_key].attributes["mac"]] = hub
+    await entry.runtime_data.async_refresh()
+    _, devices = _snapshot(hass)
+    by_mac = {s.attributes["mac"]: s for s in devices.values()}
+    for mac, hub in moved.items():
+        assert by_mac[mac].attributes["link"] == hub and by_mac[mac].attributes["placement"] == "manual"
+    before = {s.attributes["mac"]: s.attributes["link"] for s in devices.values()}
+    hub_names = sorted(s.attributes["label"] for s in _snapshot(hass)[0].values())
+
+    # Restart: unload and set up again from what was saved.
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    await entry.runtime_data.async_refresh()
+    hubs2, devices2 = _snapshot(hass)
+    assert sorted(s.attributes["label"] for s in hubs2.values()) == hub_names
+    after = {s.attributes["mac"]: s.attributes["link"] for s in devices2.values()}
+    for mac, hub in moved.items():
+        assert after[mac] == hub
+    lost = [m for m in before if m not in after]
+    assert not lost, f"devices lost on restart: {lost}"
+
+
+async def test_wrong_community_degrades_gracefully(hass: HomeAssistant, fake_net) -> None:
+    net = SHAPES["snmp_chain"](random.Random(7))
+    for n in net.nodes.values():
+        if n.snmp_community:
+            n.snmp_community = "nottheone"
+    net.community = "nottheone"
+    ctx = await _run(hass, fake_net, net, community_known=False, seed=7)
+    await _diag(hass, ctx["entry"])
+    _check(hass, ctx["entry"], net, snmp_ok=False, label="wrong community")
+    assert "snmp" not in ctx["coord"].data.sources
+
+
+async def test_report(hass: HomeAssistant) -> None:
+    """Print what the runs measured (run last: pytest -s -k report)."""
+    if not TIMES:
+        return
+    placed = STATS["placed_exact"] + STATS["placed_ancestor"] + STATS["placed_shared_port"]
+    lines = [
+        "",
+        "NetOrbit simulation report",
+        f"  networks run: {len(TIMES)} (largest {max(n for _, n, _ in TIMES)} nodes)",
+        f"  setup+first map: median {sorted(t for *_, t in TIMES)[len(TIMES) // 2] * 1000:.0f} ms, max {max(t for *_, t in TIMES) * 1000:.0f} ms",
+        f"  hubs: {STATS['hubs_found']} of {STATS['true_hubs']} found automatically, {STATS['hubs_suggested']} more suggested",
+        f"  devices wrongly turned into hubs: {STATS['device_misdetected_as_hub']}",
+        f"  automatic placements: {placed} (exact {STATS['placed_exact']}, one level up {STATS['placed_ancestor']}, shared port {STATS['placed_shared_port']})",
+        f"  devices left under the router (nothing reported): {STATS['placement_none']}",
+    ]
+    lines += [f"    missed {k[7:]}: {v}" for k, v in sorted(STATS.items()) if k.startswith("missed:")]
+    print("\n".join(lines))

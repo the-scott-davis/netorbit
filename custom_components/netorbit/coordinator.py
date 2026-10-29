@@ -109,6 +109,7 @@ class Node:
     vendor: str | None = None
     placement: str = PLACE_NONE  # manual | controller | snmp | none
     hub_source: str | None = None  # for hubs: manual | snmp | controller | detected
+    ip_changes: int = 0  # how often DHCP has moved it since NetOrbit started tracking
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -269,18 +270,19 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             fresh: list[str] = []
             host_set = self._subnet_set(hosts)
 
-            # Hubs learn their MAC from ARP too.
-            for hub in self.opts[CONF_HUBS]:
-                mac = arp.get(hub.get("host") or "")
-                if mac:
-                    self._seen.setdefault(f"hub:{hub['id']}", {"first_seen": now.isoformat()})["mac"] = mac
-
-            for ip in sorted(set(arp) | replied, key=_ip_sort):
+            # One IP per MAC. Right after a DHCP change the ARP table can still hold the old
+            # address too, so prefer the address that actually answered.
+            mac_ip: dict[str, str] = {}
+            for ip, mac in sorted(arp.items(), key=lambda kv: _ip_sort(kv[0])):
                 if ip not in host_set:
                     continue
-                mac = arp.get(ip)
-                if mac is None:
-                    continue  # answered ping but no MAC yet; picked up next sweep
+                if mac not in mac_ip or (ip in replied and mac_ip[mac] not in replied):
+                    mac_ip[mac] = ip
+
+            opts = manage.copy_options(self.opts)
+            changed = self._follow_dhcp(opts, mac_ip, arp, now)
+
+            for mac, ip in sorted(mac_ip.items(), key=lambda kv: _ip_sort(kv[1])):
                 if self.opts[CONF_IGNORE_RANDOM_MAC] and is_random_mac(mac):
                     continue
                 key = mac
@@ -290,9 +292,14 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     if key not in ignored and not self._is_hub_address(mac, ip):
                         fresh.append(key)
                 rec["mac"] = mac
+                if rec.get("ip") and rec["ip"] != ip:
+                    rec["ip_changes"] = rec.get("ip_changes", 0) + 1
+                    rec["ip_changed_at"] = now.isoformat()
                 rec["ip"] = ip
                 if ip in replied:
                     rec["last_seen"] = now.isoformat()
+            if changed:
+                self._commit(opts)
 
             await self._lookup_vendors()
             await self._resolve_names(now)
@@ -315,6 +322,62 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                         EVENT_NEW_DEVICE,
                         {"mac": rec.get("mac"), "ip": rec.get("ip"), "name": self._discovered_name(key, rec)},
                     )
+
+    def _follow_dhcp(self, opts: dict[str, Any], mac_ip: dict[str, str], arp: dict[str, str], now: datetime) -> bool:
+        """Keep hubs and hand-added devices pointed at the right address when DHCP moves them.
+
+        * A hub with a known MAC follows that MAC to its new IP.
+        * A hub without a known MAC learns it from its IP once.
+        * A device added by IP ("ip:x") is re-keyed to its MAC as soon as we learn it, so its
+          name, icon and placement survive the next DHCP change.
+        """
+        changed = False
+        for hub in opts[CONF_HUBS]:
+            seen_key = f"hub:{hub['id']}"
+            rec = self._seen.setdefault(seen_key, {"first_seen": now.isoformat()})
+            mac = hub.get("mac") or rec.get("mac")
+            if mac:
+                rec["mac"] = mac
+                new_ip = mac_ip.get(mac)
+                if new_ip and hub.get("host") and new_ip != hub["host"]:
+                    _LOGGER.info("NetOrbit: %s moved from %s to %s", hub.get("name"), hub["host"], new_ip)
+                    hub["host"] = new_ip
+                    rec["ip_changes"] = rec.get("ip_changes", 0) + 1
+                    rec["ip_changed_at"] = now.isoformat()
+                    changed = True
+                if not hub.get("mac"):
+                    hub["mac"] = mac
+                    changed = True
+            elif hub.get("host") and arp.get(hub["host"]):
+                rec["mac"] = arp[hub["host"]]
+                hub["mac"] = rec["mac"]
+                changed = True
+
+        for key in [k for k in opts[CONF_DEVICES] if k.startswith("ip:")]:
+            ip = key[3:]
+            mac = arp.get(ip)
+            if not mac or (self.opts[CONF_IGNORE_RANDOM_MAC] and is_random_mac(mac)):
+                continue
+            cfg = opts[CONF_DEVICES].pop(key)
+            cfg.pop("host", None)
+            merged = {**cfg, **opts[CONF_DEVICES].get(mac, {})}
+            opts[CONF_DEVICES][mac] = merged
+            old = self._seen.pop(key, {})
+            rec = self._seen.setdefault(mac, {"first_seen": old.get("first_seen") or now.isoformat(), "discovered": True})
+            for f in ("last_seen", "first_seen"):
+                if old.get(f) and (not rec.get(f) or (f == "last_seen" and old[f] > rec[f])):
+                    rec[f] = old[f]
+            if key in opts[CONF_IGNORED]:
+                opts[CONF_IGNORED].remove(key)
+                opts[CONF_IGNORED].append(mac)
+            changed = True
+        return changed
+
+    def _commit(self, opts: dict[str, Any]) -> None:
+        """Save options NetOrbit changed itself, without triggering a second refresh."""
+        self.opts = opts
+        self.internal_update = True
+        self.hass.config_entries.async_update_entry(self.config_entry, options=opts)
 
     def _subnet_set(self, hosts: list[str]) -> set[str]:
         cached = getattr(self, "_hosts_cache", None)
@@ -442,12 +505,17 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         return bool((mac and mac in hub_macs) or (ip and ip in hub_ips))
 
     def _hub_for_mac(self, mac: str | None) -> str | None:
+        """The hub with this MAC. A near match (a radio MAC a few off the LAN MAC) only counts
+        when exactly one hub is that close; access points bought together often have
+        consecutive MACs and must not be confused."""
         if not mac:
             return None
-        for hub_id, hmac in self._hub_macs().items():
-            if macs_close(hmac, mac):
+        hubs = self._hub_macs()
+        for hub_id, hmac in hubs.items():
+            if hmac == mac:
                 return hub_id
-        return None
+        near = [hub_id for hub_id, hmac in hubs.items() if macs_close(hmac, mac)]
+        return near[0] if len(near) == 1 else None
 
     async def _detect_hubs(self) -> None:
         """Add obvious hubs, and collect less certain ones as suggestions."""
@@ -477,7 +545,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 snmp_descr=snmp.get("descr"), ssdp_types=ssdp.get(rec.get("ip") or "", []),
             )
             verdict = classify(ev)
-            if any(macs_close(mac, ap) for ap in controller_aps):
+            if mac in controller_aps:
                 verdict.score += 3
                 verdict.hub_type = verdict.hub_type or HUB_AP
                 verdict.reasons.append("clients connect through it")
@@ -505,9 +573,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     continue
             if added:
                 _LOGGER.info("NetOrbit added hubs: %s", ", ".join(added))
-                self.opts = opts
-                self.internal_update = True
-                self.hass.config_entries.async_update_entry(self.config_entry, options=opts)
+                self._commit(opts)
 
     def _hub_name(self, mac: str, rec: dict[str, Any], hub_type: str | None) -> str:
         reg = self._registry.get(mac)
@@ -642,6 +708,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 link=parent, status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
                 source="hub", hub_type=hub.get("type", HUB_OTHER), hub_source=hub.get("source", "manual"),
+                ip_changes=rec.get("ip_changes", 0),
                 vendor=(self._seen.get(hub.get("mac") or "") or {}).get("vendor"),
             )
         if self._tables:
@@ -668,7 +735,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
                 hostname=rec.get("hostname"), source="manual" if key in devices else "discovered",
-                vendor=rec.get("vendor"), placement=placement,
+                vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
             )
 
         new_devices = []

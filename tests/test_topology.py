@@ -89,6 +89,12 @@ def test_detect_scores():
     assert reg.auto and reg.hub_type == "access_point"
     phone = classify(Evidence(vendor="Apple", hostname="Alexs-iPhone"))
     assert phone.hub_type is None
+    named_ap = classify(Evidence(vendor="Generic Devices", hostname="eap2"))
+    assert named_ap.suggest and named_ap.hub_type == "access_point"
+    model = classify(Evidence(vendor="NETGEAR", hostname="gs308-office"))
+    assert model.suggest and model.hub_type == "switch"
+    light = classify(Evidence(vendor="Espressif Inc.", hostname="hallway-light-switch"))
+    assert not light.suggest and not light.auto
 
 
 def test_pretty_vendor():

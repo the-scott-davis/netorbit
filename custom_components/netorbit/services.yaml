@@ -81,3 +81,13 @@ update_hub:
           options: [router, switch, access_point, mesh_node, other]
     parent: {selector: {text: {}}}
     config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+export_config:
+  fields:
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+import_config:
+  fields:
+    data: {required: true, selector: {object: {}}}
+    replace: {default: false, selector: {boolean: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}

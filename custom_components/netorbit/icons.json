@@ -32,6 +32,12 @@
     },
     "update_hub": {
       "service": "mdi:pencil"
+    },
+    "export_config": {
+      "service": "mdi:export"
+    },
+    "import_config": {
+      "service": "mdi:import"
     }
   }
 }
