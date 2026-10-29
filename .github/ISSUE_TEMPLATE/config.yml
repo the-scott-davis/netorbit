@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Problem with the Marketplace or HACS itself
+    url: https://github.com/home-assistant/core/issues
+    about: Downloading, updating and the store screens belong to Home Assistant.

@@ -1,0 +1,55 @@
+name: Something's wrong
+description: A device in the wrong place, a hub that isn't found, an error, or the card not drawing right.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If the problem is with the Marketplace itself (downloading, updating, the store screens), report it to Home Assistant instead: https://github.com/home-assistant/core/issues
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: ha
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.11.0"
+    validations:
+      required: true
+  - type: input
+    id: netorbit
+    attributes:
+      label: NetOrbit version
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options: [Marketplace, HACS, Manually]
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Your network
+      description: Router, mesh or access points, switches (managed or not), and whether SNMP is on. Brands and models are enough.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Settings > Devices & services > NetOrbit > the three dots > Download diagnostics, then drag the file here.
+        It replaces every IP, MAC, name and the SNMP community with placeholders, so it's safe to share.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines
+      description: Anything from Settings > System > Logs that mentions netorbit.
+      render: text

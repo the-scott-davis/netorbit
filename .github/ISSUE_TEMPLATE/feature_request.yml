@@ -1,0 +1,15 @@
+name: Idea
+description: A router, mesh system or controller NetOrbit should understand, or something the card should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Your network
+      description: If this is about a brand or controller, which one, and which Home Assistant integration you use for it.

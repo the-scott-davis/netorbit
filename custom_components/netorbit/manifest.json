@@ -1,6 +1,15 @@
 {
   "domain": "netorbit",
   "name": "NetOrbit",
+  "after_dependencies": [
+    "frontend",
+    "ssdp"
+  ],
+  "categories": [
+    "computers_network.routers_network",
+    "computers_network.monitoring",
+    "presence_location.network_presence"
+  ],
   "codeowners": [
     "@the-scott-davis"
   ],
@@ -8,10 +17,6 @@
   "dependencies": [
     "http",
     "network"
-  ],
-  "after_dependencies": [
-    "frontend",
-    "ssdp"
   ],
   "documentation": "https://github.com/the-scott-davis/netorbit",
   "integration_type": "service",

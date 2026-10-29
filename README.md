@@ -1,5 +1,7 @@
 # NetOrbit
 
+[![Marketplace](https://img.shields.io/badge/Home%20Assistant-Marketplace-41BDF5.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=the-scott-davis&repository=netorbit&category=integration) [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=the-scott-davis&repository=netorbit&category=integration) ![Version](https://img.shields.io/github/v/release/the-scott-davis/netorbit) ![License](https://img.shields.io/github/license/the-scott-davis/netorbit)
+
 A live, radial map of your home network for Home Assistant. Every device orbits the router, switch, access point or mesh node it connects through, colored by whether it's answering right now, was seen recently, or has gone quiet.
 
 Install it, click Submit, and NetOrbit draws the best map your network can tell it about. Then fix anything it couldn't work out by dragging devices around, pasting a client list, or asking an AI assistant to do it for you.
@@ -65,15 +67,34 @@ Placement you choose always wins over automatic placement. Each device shows how
 
 ## Install
 
-### HACS
+NetOrbit installs from the Home Assistant **Marketplace** (Home Assistant 2026.11 and newer) or from **HACS** (older versions). It's the same repository either way. HACS is built into Home Assistant as the Marketplace starting with 2026.11, which is expected around early November 2026. Until that release is out and settled, the exact screens below may differ a little.
+
+NetOrbit needs Home Assistant 2026.2 or newer.
+
+### Marketplace (Home Assistant 2026.11 and newer)
+
+[![Open NetOrbit in the Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=the-scott-davis&repository=netorbit&category=integration)
+
+1. Click the button above, or go to **Settings > Marketplace** and add `https://github.com/the-scott-davis/netorbit` as a custom repository with type **Integration**. Adding a custom repository asks you to connect a GitHub account once.
+2. Download **NetOrbit**. Home Assistant shows a warning that community code runs with full access to your home; read it and confirm.
+3. Set it up when asked, or go to **Settings > Devices & services > Add integration > NetOrbit**. The subnet and router are filled in for you. No restart is needed for a first install.
+4. Refresh your browser once so the card loads.
+
+Updates show up in **Settings > Updates** like any other. Updating still needs a restart.
+
+### HACS (Home Assistant 2026.10 and older)
+
+[![Open NetOrbit in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=the-scott-davis&repository=netorbit&category=integration)
 
 1. In HACS, open the menu, choose **Custom repositories**, add `https://github.com/the-scott-davis/netorbit` with type **Integration**.
-2. Install **NetOrbit** and restart Home Assistant.
-3. Go to **Settings > Devices & services > Add integration > NetOrbit**. The subnet and router are filled in for you.
+2. Download **NetOrbit** and restart Home Assistant.
+3. Go to **Settings > Devices & services > Add integration > NetOrbit**.
+
+When you later update to 2026.11, Home Assistant moves NetOrbit into the Marketplace for you. Nothing to reinstall, and your settings stay.
 
 ### Manual
 
-Copy `custom_components/netorbit` into your Home Assistant `config/custom_components` folder and restart.
+Copy `custom_components/netorbit` into your Home Assistant `config/custom_components` folder and restart. You won't get update notifications this way.
 
 ### Add the card
 
@@ -82,7 +103,7 @@ type: custom:netorbit-card
 title: Home Network
 ```
 
-It's also in the card picker as **NetOrbit**.
+It's also in the card picker as **NetOrbit**. The integration serves the card itself, so there's no dashboard resource to add, whichever way you installed.
 
 ## Settings
 
@@ -174,7 +195,7 @@ Every service returns a response describing what it did. Devices can be given by
 - [Notify when a device goes offline](blueprints/automation/netorbit/device_offline_notify.yaml)
 - [Notify when a new device joins](blueprints/automation/netorbit/new_device_notify.yaml)
 
-Import either from **Settings > Automations & scenes > Blueprints > Import blueprint** using the file's GitHub URL.
+Import either from **Settings > Automations & scenes > Blueprints > Import blueprint** using the file's GitHub URL. The Marketplace and HACS install the integration only, so blueprints are always imported this way.
 
 ## Requirements and limits
 
