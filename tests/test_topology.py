@@ -91,7 +91,7 @@ def test_detect_scores():
     assert phone.hub_type is None
     ext = classify(Evidence(vendor="NETGEAR", hostname="shed-extender"))
     assert ext.suggest and ext.hub_type == "access_point"
-    named_ap = classify(Evidence(vendor="Generic Devices", hostname="eap2"))
+    named_ap = classify(Evidence(vendor="Generic Devices", hostname="eap7"))
     assert named_ap.suggest and named_ap.hub_type == "access_point"
     model = classify(Evidence(vendor="NETGEAR", hostname="gs308-office"))
     assert model.suggest and model.hub_type == "switch"
