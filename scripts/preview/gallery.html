@@ -1,0 +1,29 @@
+<!doctype html>
+<!-- Draws one dumped state file with real icons: gallery.html?f=<name>.json&title=... -->
+<html><head><meta charset="utf-8">
+<style>body { margin:0; background:#111318; padding:0; width:960px; }</style>
+<script>
+  window.MDI = {};
+  customElements.define("ha-icon", class extends HTMLElement {
+    connectedCallback() {
+      const name = this.getAttribute("icon") || "";
+      const key = "mdi" + name.slice(4).split("-").map((p) => p[0].toUpperCase() + p.slice(1)).join("");
+      this.innerHTML = `<svg viewBox="0 0 24 24" style="width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);display:block;fill:currentColor"><path d="${window.MDI[key] || ""}"/></svg>`;
+      this.style.display = "inline-flex";
+    }
+  });
+  customElements.define("ha-card", class extends HTMLElement { connectedCallback() { this.style.display = "block"; this.style.borderRadius = "12px"; } });
+</script>
+<script src="../../custom_components/netorbit/frontend/netorbit-card.js"></script>
+</head><body><div id="c"></div>
+<script type="module">
+  try { Object.assign(window.MDI, await import("/scripts/preview/mdi.js")); } catch (e) {}
+  const q = new URLSearchParams(location.search);
+  const states = await (await fetch("_simstates/" + q.get("f"))).json();
+  const card = document.createElement("netorbit-card");
+  card.setConfig({ title: q.get("title") || "Home Network", show_ip: false });
+  document.getElementById("c").appendChild(card);
+  card.hass = { states, entities: {}, user: { is_admin: true }, callService: async () => {} };
+  window.states = states;
+  window.ready = true;
+</script></body></html>

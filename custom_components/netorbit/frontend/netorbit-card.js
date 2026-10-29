@@ -112,7 +112,7 @@ function netorbitLayout(model, opts) {
 
 /** Push apart hubs that ended up on top of each other, keeping them between the router and the device ring. */
 function netorbitSpreadHubs(pos, keys, o) {
-  const minD = 74;
+  const minD = 88;
   const rMin = 105, rMax = o.rDev - 60;
   for (let iter = 0; iter < 120; iter++) {
     let moved = false;
@@ -288,7 +288,8 @@ class NetOrbitCard extends HTMLElement {
       const share = Math.max(3, Math.floor(max / Object.keys(byHub).length));
       const kept = [];
       Object.entries(byHub).forEach(([hub, list]) => {
-        list.sort((a, b) => (rank[a.status] - rank[b.status]) || String(a.label).localeCompare(String(b.label)));
+        // Possible hubs first (they need a tap), then problems, then the rest.
+        list.sort((a, b) => (!!b.suggested - !!a.suggested) || (rank[a.status] - rank[b.status]) || String(a.label).localeCompare(String(b.label)));
         if (list.length <= share) { kept.push(...list); return; }
         const shown = list.slice(0, share - 1);
         const rest = list.slice(share - 1);
@@ -346,6 +347,7 @@ class NetOrbitCard extends HTMLElement {
       `<foreignObject x="${(p.x - r).toFixed(1)}" y="${(p.y - r).toFixed(1)}" width="${2 * r}" height="${2 * r}" pointer-events="none"><div xmlns="http://www.w3.org/1999/xhtml" class="ic" style="width:${2 * r}px;height:${2 * r}px;color:${color};--mdc-icon-size:${Math.round(r * 1.05)}px"><ha-icon icon="${noEsc(icon)}"></ha-icon></div></foreignObject>`;
 
     let gfx = "";
+    let labels = "";
     Object.values(hubs).forEach((h) => {
       const p = pos[h.key];
       if (!p) return;
@@ -354,9 +356,23 @@ class NetOrbitCard extends HTMLElement {
       const isGroup = h.kind === "group";
       const r = isRoot ? 32 : isGroup ? 19 : 25;
       const c = col(isNew ? "new" : h.status);
-      const below = isRoot || p.y >= C.y - 4;
-      const ly1 = below ? p.y + r + 21 : p.y - r - 27;
+      // Label below, above, right or left: the first side with room, judged against other hubs and the router's label.
+      const obstacles = Object.values(hubs).filter((o) => o.key !== h.key && pos[o.key]).map((o) => pos[o.key]);
+      if (!isRoot) obstacles.push({ x: C.x, y: C.y + 32 + 30 });
+      devices.forEach((d) => { const q = pos[d.key]; if (q && Math.abs(q.x - p.x) < 160 && Math.abs(q.y - p.y) < 90) obstacles.push(q); });
+      const room = (x, y) => Math.min(1e9, ...obstacles.map((o) => Math.hypot((o.x - x) * 0.6, o.y - y)));
+      const sides = [
+        { side: "below", x: p.x, y1: p.y + r + 21, cx: p.x, cy: p.y + r + 28, anchor: "middle" },
+        { side: "above", x: p.x, y1: p.y - r - 27, cx: p.x, cy: p.y - r - 20, anchor: "middle" },
+        { side: "right", x: p.x + r + 10, y1: p.y - 2, cx: p.x + r + 55, cy: p.y + 6, anchor: "start" },
+        { side: "left", x: p.x - r - 10, y1: p.y - 2, cx: p.x - r - 55, cy: p.y + 6, anchor: "end" },
+      ];
+      if (!(isRoot || p.y >= C.y - 4)) sides.unshift(sides.splice(1, 1)[0]);
+      const pick = isRoot ? sides[0] : (sides.find((s) => room(s.cx, s.cy) >= 46) || sides.reduce((a, s) => (room(s.cx, s.cy) > room(a.cx, a.cy) ? s : a)));
+      const ly1 = pick.y1;
       const ly2 = ly1 + 16;
+      const lx = pick.x;
+      const anchor = pick.anchor;
       let sub = isNew
         ? `${devices.filter((d) => d.kind === "new").length} waiting`
         : isGroup ? `${h.count} devices`
@@ -366,9 +382,11 @@ class NetOrbitCard extends HTMLElement {
       gfx += `<g class="node hub ${isGroup ? "group" : ""} ${target}" data-key="${noEsc(h.key)}">` +
         (isGroup ? "" : `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r + 9}" class="halo" fill="${c}"/>`) +
         `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" class="disc ${isNew || isGroup ? "dashed" : ""} ${h.status === "stale" ? "pulse" : ""}" stroke="${c}"/>` +
-        iconFO(p, r, h.icon, c) +
-        `<text x="${p.x.toFixed(1)}" y="${ly1.toFixed(1)}" class="hlab ${isGroup ? "glab" : ""}">${noEsc(noTrunc(h.label, 26))}</text>` +
-        (sub ? `<text x="${p.x.toFixed(1)}" y="${ly2.toFixed(1)}" class="hsub">${noEsc(sub)}</text>` : "") +
+        iconFO(p, r, h.icon, c) + `</g>`;
+      // Hub labels go in their own layer, drawn after devices so nothing covers them.
+      labels += `<g class="hlabels" pointer-events="none">` +
+        `<text x="${lx.toFixed(1)}" y="${ly1.toFixed(1)}" class="hlab ${isGroup ? "glab" : ""}" style="text-anchor:${anchor}">${noEsc(noTrunc(h.label, 26))}</text>` +
+        (sub ? `<text x="${lx.toFixed(1)}" y="${ly2.toFixed(1)}" class="hsub" style="text-anchor:${anchor}">${noEsc(sub)}</text>` : "") +
         `</g>`;
     });
 
@@ -486,7 +504,7 @@ class NetOrbitCard extends HTMLElement {
       <defs><filter id="noblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>
       <circle class="ring" cx="${C.x}" cy="${C.y}" r="370"/>
       ${links}
-      ${gfx}
+      ${gfx}${labels}
       <circle class="ghost" r="17" cx="-500" cy="-500"/>
     </svg>
     <div class="tip"></div>

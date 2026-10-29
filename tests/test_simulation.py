@@ -363,3 +363,51 @@ async def test_report(hass: HomeAssistant) -> None:
     ]
     lines += [f"    missed {k[7:]}: {v}" for k, v in sorted(STATS.items()) if k.startswith("missed:")]
     print("\n".join(lines))
+
+
+# ----- documentation screenshots ---------------------------------------------------------
+
+DOC_SCENES = ["flat_25", "mesh_22", "unifi_30", "snmp_home", "big_mesh_dhcp", "big_snmp"]
+
+
+@pytest.mark.parametrize("scene", DOC_SCENES)
+async def test_docs_scene(hass: HomeAssistant, fake_net, freezer, scene: str) -> None:
+    """Realistic states for README screenshots. Only runs with NETORBIT_DUMP set."""
+    import os  # noqa: PLC0415
+
+    from .sim.netgen import flat, mesh_no_data, snmp_chain, unifi  # noqa: PLC0415
+
+    if not os.environ.get("NETORBIT_DUMP"):
+        pytest.skip("screenshots only")
+    rng = random.Random(scene)
+    net = {
+        "flat_25": lambda: flat(rng, 25),
+        "mesh_22": lambda: mesh_no_data(rng, 3, 22),
+        "unifi_30": lambda: unifi(rng, 3, 30),
+        "snmp_home": lambda: snmp_chain(rng, 2, 34),
+        "big_mesh_dhcp": lambda: mesh_no_data(rng, 4, 360),
+        "big_snmp": lambda: snmp_chain(rng, 3, 330),
+    }[scene]()
+    ctx = await _run(hass, fake_net, net, community_known=True, seed=1)
+    devs = [n for n in net.devices() if n.ip and not n.random_mac]
+    rng.shuffle(devs)
+    # A few devices gone for over a day (red), a few gone for a couple of hours (yellow).
+    for n in devs[: max(1, len(devs) // 25)]:
+        n.answers_ping = False
+    _apply(fake_net, net, rng)
+    freezer.tick(timedelta(hours=25))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    for n in devs[len(devs) // 25 : len(devs) // 25 + max(1, len(devs) // 15)]:
+        n.answers_ping = False
+    if "dhcp" in scene:
+        for _ in range(3):
+            await _churn(hass, fake_net, freezer, net, rng)
+    else:
+        _apply(fake_net, net, rng)
+        freezer.tick(timedelta(seconds=301))
+        async_fire_time_changed(hass)
+        for _ in range(3):
+            await hass.async_block_till_done(wait_background_tasks=True)
+    await ctx["coord"].async_refresh()
+    _dump(hass, "docs_" + scene)

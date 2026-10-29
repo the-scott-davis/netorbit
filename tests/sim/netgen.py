@@ -181,7 +181,7 @@ def flat(rng: random.Random, n: int = 12) -> Network:
 
 
 def mesh_no_data(rng: random.Random, nodes: int = 3, n: int = 20) -> Network:
-    b = Builder("mesh_no_data", rng)
+    b = Builder("mesh_no_data", rng, subnet="192.0.2.0/24" if n < 200 else "10.20.0.0/22")
     b.net.nodes["router"].vendor = "eero"
     b.net.nodes["router"].mac = b.mac("eero")
     for i in range(nodes - 1):
@@ -219,7 +219,7 @@ def snmp_single(rng: random.Random, aps: int = 2, n: int = 20, community: str = 
 
 def snmp_chain(rng: random.Random, depth: int = 3, n: int = 30, community: str = "public") -> Network:
     """Router > sw0 > sw1 > sw2 ..., APs and an unmanaged switch hanging off the chain."""
-    b = Builder("snmp_chain", rng)
+    b = Builder("snmp_chain", rng, subnet="192.0.2.0/24" if n < 200 else "10.20.0.0/22")
     b.net.community = community
     parent = "router"
     for i in range(depth):

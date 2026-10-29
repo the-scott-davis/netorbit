@@ -26,7 +26,7 @@ MIXED_VENDORS = (
 # Brands that are only mesh systems.
 MESH_VENDORS = ("eero", "plume design")
 
-_AP_RE = re.compile(r"(^|[^a-z])(uap|u6|u7|eap\d*|wap|ap|access[- ]?point|ac-?lite|ac-?pro|nanohd|unifi-ap|ruckus)([^a-z]|$)")
+_AP_RE = re.compile(r"(^|[^a-z])(uap|u6|u7|eap\d*|wap|ap|access[- ]?point|ac-?lite|ac-?pro|nanohd|unifi-ap|ruckus|extender|repeater|range-?extender|re\d{3})([^a-z]|$)")
 _SWITCH_RE = re.compile(r"(^|[^a-z])(usw|switch|sw\d*|sg\d+|gs\d+|poe|tl-sg)([^a-z]|$)")
 _SWITCH_MODEL_RE = re.compile(r"(^|[^a-z])(usw|sw\d+|sg\d+|gs\d+|tl-sg|poe|switch-?\d+)")
 _MESH_RE = re.compile(r"(deco|eero|orbi|satellite|google-?wifi|nest-?wifi|velop|mesh|amplifi|plume|superpod)")

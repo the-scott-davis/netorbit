@@ -30,6 +30,28 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
 | --- |
 | ![](docs/edit.png) |
 
+## Tested on simulated networks
+
+Every release is run against hundreds of generated home networks (see [the network simulator](#the-network-simulator)). These are a few of them, drawn by the real card from the real integration's output.
+
+| Router only, 25 devices | Mesh with nothing reporting placement |
+| --- | --- |
+| ![](docs/sim-flat-25.png) | ![](docs/sim-mesh.png) |
+
+| UniFi | Managed switches with SNMP |
+| --- | --- |
+| ![](docs/sim-unifi.png) | ![](docs/sim-snmp.png) |
+
+| 330 devices behind three managed switches | 360 devices on a busy mesh network |
+| --- | --- |
+| ![](docs/sim-big-snmp.png) | ![](docs/sim-big-mesh.png) |
+
+| After three rounds of DHCP changes |
+| --- |
+| ![](docs/sim-dhcp-tip.png) |
+
+Big networks fold quiet devices into "+N more" bubbles (tap one to see the list), while devices that need attention and possible hubs always stay on the map. In the DHCP shot the router reshuffled addresses three times; every name, icon and placement followed its MAC address, and hovering a device whose IP changed shows the reservation tip.
+
 ## What your network can tell NetOrbit
 
 | Your setup | Hubs found | Devices placed under the right hub |
