@@ -2,7 +2,7 @@
  * Draws a live radial map from the NetOrbit integration's sensors.
  * https://github.com/the-scott-davis/netorbit  (MIT)
  */
-const NETORBIT_VERSION = "0.1.0";
+const NETORBIT_VERSION = "0.2.0";
 
 const NO_STATUS = {
   online: { color: "#34d399", label: "Online" },
@@ -42,7 +42,7 @@ function noTrunc(s, n) {
 
 /** Pure layout: returns positions for hubs and leaves. Exported for tests. */
 function netorbitLayout(model, opts) {
-  const o = Object.assign({ cx: 500, cy: 500, rDev: 370, rHub1: 135, hubStep: 125, rHubMax: 290 }, opts || {});
+  const o = Object.assign({ cx: 500, cy: 500, rDev: 370, rHub1: 135, hubStep: 125, rHubMax: 290, rGroup: 245 }, opts || {});
   const { hubs, root, devices } = model;
   const kidsHub = {};
   const kidsDev = {};
@@ -103,10 +103,31 @@ function netorbitLayout(model, opts) {
     if (h === root || !range[h]) return;
     const [a0, a1] = range[h];
     const a = (angle(a0) + angle(a1)) / 2;
-    const r = Math.min(o.rHubMax, o.rHub1 + (depth[h] - 1) * hubStep);
+    const r = hubs[h].kind === "group" ? o.rGroup : Math.min(o.rHubMax, o.rHub1 + (depth[h] - 1) * hubStep);
     pos[h] = { x: o.cx + r * Math.cos(a), y: o.cy + r * Math.sin(a), a, depth: depth[h] };
   });
   return { pos, slots, N, arc: (Math.PI * 2 * o.rDev) / N, kidsHub, depth };
+}
+
+const NO_PLACEMENT = {
+  manual: "You placed it",
+  controller: "Reported by your Wi-Fi system",
+  snmp: "Seen in a switch's MAC table",
+  none: "Not known yet",
+};
+
+// Groups used when nothing reports which hub a device uses.
+const NO_GROUPS = [
+  { id: "media", label: "TV & media", icon: "mdi:television-classic", match: /television|speaker|soundbar|gamepad|nintendo|playstation|xbox|virtual-reality|apple|cast|music|movie|play/ },
+  { id: "computers", label: "Computers & phones", icon: "mdi:laptop", match: /laptop|monitor|desktop|cellphone|tablet|watch|server|printer|nas|book/ },
+  { id: "cameras", label: "Cameras & security", icon: "mdi:cctv", match: /cctv|camera|doorbell|smoke|alarm|lock|shield/ },
+  { id: "home", label: "Smart home", icon: "mdi:home-automation", match: /chip|thermostat|robot|garage|light|bulb|power|socket|plug|home|fan|purifier|kettle|fridge|sprinkler|pool|ev-|car|bowl|cat|dog|weather|blind|switch/ },
+];
+
+function noGroupFor(icon) {
+  const s = String(icon || "");
+  for (const g of NO_GROUPS) if (g.match.test(s)) return g.id;
+  return "other";
 }
 
 class NetOrbitCard extends HTMLElement {
@@ -115,8 +136,12 @@ class NetOrbitCard extends HTMLElement {
   }
 
   setConfig(config) {
-    this._config = Object.assign({ title: "Network", height: 900, show_ip: false, show_legend: true, hide_sleepy_offline: false }, config || {});
+    this._config = Object.assign(
+      { title: "Network", height: 900, show_ip: false, show_legend: true, hide_sleepy_offline: false, group_by_type: true },
+      config || {}
+    );
     this._sig = "";
+    this._edit = false;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
   }
 
@@ -125,11 +150,16 @@ class NetOrbitCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._drag || this._popOpen) return; // never redraw under the user's finger
     const model = this._model();
-    const sig = JSON.stringify([model.sig, this._popKey || ""]);
+    const sig = JSON.stringify([model.sig, this._edit]);
     if (sig === this._sig) return;
     this._sig = sig;
     this._render(model);
+  }
+
+  _isAdmin() {
+    return !!(this._hass && this._hass.user && this._hass.user.is_admin);
   }
 
   _entities() {
@@ -143,6 +173,7 @@ class NetOrbitCard extends HTMLElement {
 
   _model() {
     const hass = this._hass;
+    const cfg = this._config;
     const states = this._entities();
     const hubs = {};
     const devices = [];
@@ -153,34 +184,65 @@ class NetOrbitCard extends HTMLElement {
       const a = s.attributes;
       if (a.kind === "summary") {
         summary = s;
-        sig.push((a.new_devices || []).map((d) => d.key).join(","));
+        sig.push(JSON.stringify([a.new_devices, a.suggested_hubs, a.group_by_type]));
         return;
       }
       const icon = ((hass.entities || {})[s.entity_id] || {}).icon || a.icon || "mdi:lan-connect";
       const n = {
         key: a.node_key, entity: s.entity_id, label: a.label || a.friendly_name, ip: a.ip, mac: a.mac,
         kind: a.kind, link: a.link, parent: a.link, sleepy: a.sleepy === true, last_seen: a.last_seen,
-        hub_type: a.hub_type, hostname: a.hostname, icon,
+        hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
         status: NO_STATUS[s.state] ? s.state : "unknown",
       };
-      sig.push(n.key + n.status + n.link + n.label + icon + (n.sleepy ? 1 : 0));
+      sig.push([n.key, n.status, n.link, n.label, icon, n.sleepy ? 1 : 0, n.placement].join("~"));
       if (a.kind === "hub") {
         hubs[n.key] = n;
         if (!n.link && !root) root = n.key;
-      } else if (!(this._config.hide_sleepy_offline && n.sleepy && n.status !== "online")) {
+      } else if (!(cfg.hide_sleepy_offline && n.sleepy && n.status !== "online")) {
         devices.push(n);
       }
     });
     if (!root && Object.keys(hubs).length) root = Object.keys(hubs)[0];
+    if (!root) return { hubs, devices, root, summary, sig: sig.join("|"), suggestions: {} };
+
+    // Suggested hubs: mark the device if we track it, otherwise show it in the "new" bubble.
+    const suggestions = {};
+    ((summary && summary.attributes.suggested_hubs) || []).forEach((s) => (suggestions[String(s.mac || "").toUpperCase()] = s));
+    devices.forEach((d) => { if (d.mac && suggestions[d.mac]) d.suggested = suggestions[d.mac]; });
+
     const fresh = summary ? summary.attributes.new_devices || [] : [];
-    if (fresh.length && root) {
+    const tracked = new Set(devices.map((d) => d.mac));
+    const loose = Object.values(suggestions).filter((s) => !tracked.has(String(s.mac).toUpperCase()));
+    if ((fresh.length || loose.length) && root) {
       hubs.__new = { key: "__new", label: "New devices", kind: "newhub", parent: root, status: "new", icon: "mdi:tag-plus-outline" };
       fresh.forEach((d) => devices.push({
         key: "new:" + d.key, raw: d, label: d.name || d.mac || d.ip, ip: d.ip, mac: d.mac, kind: "new", link: "__new",
-        status: "new", icon: "mdi:help-circle-outline", last_seen: d.last_seen,
+        status: "new", icon: "mdi:help-circle-outline", last_seen: d.last_seen, vendor: d.vendor,
+      }));
+      loose.forEach((s) => devices.push({
+        key: "sug:" + s.key, raw: s, label: s.name, ip: s.ip, mac: s.mac, kind: "new", link: "__new",
+        status: "new", icon: "mdi:access-point-network", suggested: s,
       }));
     }
-    return { hubs, devices, root, summary, sig: sig.join("|") };
+
+    // Group devices by type when nothing knows where they connect.
+    const wantGroups = cfg.group_by_type !== false && (!summary || summary.attributes.group_by_type !== false);
+    const loners = devices.filter((d) => d.kind === "device" && d.link === root && d.placement !== "manual");
+    if (wantGroups && loners.length >= 8) {
+      const byGroup = {};
+      loners.forEach((d) => (byGroup[noGroupFor(d.icon)] = (byGroup[noGroupFor(d.icon)] || []).concat(d)));
+      // Single devices stay on the router; a group of one is just noise.
+      Object.keys(byGroup).forEach((gid) => { if (byGroup[gid].length < 2) delete byGroup[gid]; });
+      if (Object.keys(byGroup).length > 1) {
+        Object.entries(byGroup).forEach(([gid, list]) => {
+          const g = NO_GROUPS.find((x) => x.id === gid) || { label: "Other", icon: "mdi:devices" };
+          const key = "__grp_" + gid;
+          hubs[key] = { key, label: g.label, kind: "group", parent: root, status: "group", icon: g.icon, count: list.length };
+          list.forEach((d) => (d.link = key));
+        });
+      }
+    }
+    return { hubs, devices, root, summary, suggestions, sig: sig.join("|") };
   }
 
   _render(model) {
@@ -190,13 +252,17 @@ class NetOrbitCard extends HTMLElement {
       this.shadowRoot.innerHTML = `<ha-card header="${noEsc(cfg.title)}"><div style="padding:16px">No NetOrbit sensors found. Add the NetOrbit integration under Settings, Devices &amp; services.</div></ha-card>`;
       return;
     }
+    this._model_ = model;
     const L = netorbitLayout(model, {});
     const pos = L.pos;
+    this._pos = pos;
     const C = pos[root];
-    const col = (s) => (NO_STATUS[s] || NO_STATUS.unknown).color;
+    const col = (s) => (s === "group" ? "#64748b" : (NO_STATUS[s] || NO_STATUS.unknown).color);
     const live = (s) => s === "online";
     const fs = Math.max(9, Math.min(12.5, L.arc * 0.42));
     const maxChars = L.N > 60 ? 16 : 22;
+    const edit = this._edit;
+    const admin = this._isAdmin();
 
     const curve = (p, q, bend) => {
       const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
@@ -209,14 +275,13 @@ class NetOrbitCard extends HTMLElement {
       if (h.key === root || !pos[h.key]) return;
       const p = pos[hubs[h.parent] ? h.parent : root];
       const s = h.kind === "newhub" ? "new" : h.status;
-      links += `<path class="lk strong ${live(s) ? "live" : ""} ${h.kind === "newhub" ? "dashed" : ""}" d="${curve(p, pos[h.key], 0)}" stroke="${col(s)}"/>`;
+      const faint = h.kind === "group" ? "faint" : "strong";
+      links += `<path class="lk ${faint} ${live(s) ? "live" : ""} ${h.kind === "newhub" ? "dashed" : ""}" d="${curve(p, pos[h.key], 0)}" stroke="${col(s)}"/>`;
     });
     devices.forEach((d) => {
       const p = pos[d.key];
-      if (!p) return;
-      const hp = pos[p.hub];
-      if (!hp) return;
-      links += `<path class="lk ${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""}" d="${curve(hp, p)}" stroke="${col(d.status)}"/>`;
+      if (!p || !pos[p.hub]) return;
+      links += `<path class="lk ${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""}" d="${curve(pos[p.hub], p)}" stroke="${col(d.status)}"/>`;
     });
 
     const iconFO = (p, r, icon, color) =>
@@ -228,20 +293,23 @@ class NetOrbitCard extends HTMLElement {
       if (!p) return;
       const isRoot = h.key === root;
       const isNew = h.kind === "newhub";
-      const r = isRoot ? 32 : 25;
+      const isGroup = h.kind === "group";
+      const r = isRoot ? 32 : isGroup ? 19 : 25;
       const c = col(isNew ? "new" : h.status);
       const below = isRoot || p.y >= C.y - 4;
       const ly1 = below ? p.y + r + 21 : p.y - r - 27;
       const ly2 = ly1 + 16;
       let sub = isNew
         ? `${devices.filter((d) => d.kind === "new").length} waiting`
+        : isGroup ? `${h.count} devices`
         : (cfg.show_ip && h.ip) ? h.ip : (NO_HUB_TYPE[h.hub_type] || "");
       if (String(sub).toLowerCase() === String(h.label).toLowerCase()) sub = "";
-      gfx += `<g class="node hub" data-key="${noEsc(h.key)}">` +
-        `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r + 9}" class="halo" fill="${c}"/>` +
-        `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" class="disc ${isNew ? "dashed" : ""} ${h.status === "stale" ? "pulse" : ""}" stroke="${c}"/>` +
+      const target = edit && h.kind === "hub" ? "target" : "";
+      gfx += `<g class="node hub ${isGroup ? "group" : ""} ${target}" data-key="${noEsc(h.key)}">` +
+        (isGroup ? "" : `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r + 9}" class="halo" fill="${c}"/>`) +
+        `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" class="disc ${isNew || isGroup ? "dashed" : ""} ${h.status === "stale" ? "pulse" : ""}" stroke="${c}"/>` +
         iconFO(p, r, h.icon, c) +
-        `<text x="${p.x.toFixed(1)}" y="${ly1.toFixed(1)}" class="hlab">${noEsc(noTrunc(h.label, 26))}</text>` +
+        `<text x="${p.x.toFixed(1)}" y="${ly1.toFixed(1)}" class="hlab ${isGroup ? "glab" : ""}">${noEsc(noTrunc(h.label, 26))}</text>` +
         (sub ? `<text x="${p.x.toFixed(1)}" y="${ly2.toFixed(1)}" class="hsub">${noEsc(sub)}</text>` : "") +
         `</g>`;
     });
@@ -256,34 +324,43 @@ class NetOrbitCard extends HTMLElement {
       const tr = p.r + 24;
       const tx = C.x + tr * Math.cos(p.a), ty = C.y + tr * Math.sin(p.a);
       const rot = flip ? deg + 180 : deg;
-      gfx += `<g class="node dev ${d.status} ${d.sleepy ? "sleepy" : ""}" data-key="${noEsc(d.key)}">` +
+      gfx += `<g class="node dev ${d.status} ${d.sleepy ? "sleepy" : ""} ${edit && d.kind === "device" ? "draggable" : ""}" data-key="${noEsc(d.key)}">` +
         (live(d.status) ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="halo" fill="${c}"/>` : "") +
+        (d.suggested ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="sugring"/>` : "") +
         `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15" class="disc ${d.status === "stale" ? "pulse" : ""} ${d.kind === "new" ? "dashed" : ""}" stroke="${c}"/>` +
         iconFO(p, 15, d.icon, c) +
         (d.sleepy ? `<circle cx="${(p.x + 11).toFixed(1)}" cy="${(p.y - 11).toFixed(1)}" r="5" class="zz"/>` : "") +
+        (d.placement === "manual" && edit ? `<circle cx="${(p.x - 11).toFixed(1)}" cy="${(p.y - 11).toFixed(1)}" r="4.5" class="pin"/>` : "") +
         `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" transform="rotate(${rot.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)})" text-anchor="${flip ? "end" : "start"}" dominant-baseline="middle" class="dlab" style="font-size:${fs.toFixed(1)}px">${noEsc(noTrunc(d.label, maxChars))}</text></g>`;
     });
 
     const counts = { online: 0, recent: 0, stale: 0, new: 0 };
-    devices.forEach((d) => { if (counts[d.status] !== undefined) counts[d.status]++; });
+    devices.forEach((d) => { if (counts[d.status] !== undefined && !d.key.startsWith("sug:")) counts[d.status]++; });
+    const nSug = Object.keys(model.suggestions || {}).length;
     const chip = (k) => `<span class="chip"><i style="background:${NO_STATUS[k].color}"></i>${counts[k]} ${NO_STATUS[k].label}</span>`;
     const staleH = summary ? summary.attributes.stale_hours : 24;
-    const isAdmin = !!(this._hass.user && this._hass.user.is_admin);
+    const grouped = Object.values(hubs).some((h) => h.kind === "group");
 
     this.shadowRoot.innerHTML = `
 <style>
   :host { display:block; }
-  ha-card { overflow:hidden; background: radial-gradient(ellipse at 50% 48%, #13213a 0%, #0b1220 55%, #070b14 100%); color:#e2e8f0; border:1px solid rgba(148,163,184,.12); }
+  ha-card { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); overflow:hidden; background: radial-gradient(ellipse at 50% 48%, #13213a 0%, #0b1220 55%, #070b14 100%); color:#e2e8f0; border:1px solid rgba(148,163,184,.12); }
   .head { display:flex; flex-wrap:wrap; align-items:center; gap:10px 12px; padding:16px 18px 4px; }
   .title { font-size:20px; font-weight:600; margin-right:auto; display:flex; align-items:center; gap:8px; }
   .title ha-icon { --mdc-icon-size:22px; color:#60a5fa; }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:#cbd5e1; background:rgba(148,163,184,.08); border:1px solid rgba(148,163,184,.14); padding:4px 10px; border-radius:999px; font-variant-numeric:tabular-nums; }
   .chip i { width:8px; height:8px; border-radius:50%; display:inline-block; }
-  .wrap { position:relative; }
-  svg { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); width:100%; height:auto; display:block; max-height:${Number(cfg.height) || 900}px; }
+  .chip.sug { border-color:rgba(251,191,36,.45); color:#fde68a; }
+  .editbtn { font:inherit; font-size:12.5px; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; border:1px solid rgba(96,165,250,.45); background:transparent; color:#bfdbfe; cursor:pointer; }
+  .editbtn.on { background:#2563eb; border-color:#2563eb; color:#fff; }
+  .editbtn ha-icon { --mdc-icon-size:16px; }
+  .banner { margin:6px 18px 0; padding:8px 12px; border-radius:8px; background:rgba(37,99,235,.15); border:1px solid rgba(96,165,250,.35); font-size:13px; color:#dbeafe; }
+  .wrap { position:relative; touch-action:${edit ? "none" : "auto"}; }
+  svg { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); width:100%; height:auto; display:block; max-height:${Number(cfg.height) || 900}px; user-select:none; -webkit-user-select:none; }
   .ring { fill:none; stroke:rgba(148,163,184,.07); stroke-width:1; }
   .lk { fill:none; stroke-width:1.4; opacity:.45; }
   .lk.strong { stroke-width:2.6; opacity:.75; }
+  .lk.faint { stroke-width:1.2; opacity:.25; stroke-dasharray:2 5; }
   .lk.dashed { stroke-dasharray:3 6; }
   .lk.live { stroke-dasharray:6 10; animation: flow 1.6s linear infinite; opacity:.8; }
   .lk.strong.live { stroke-dasharray:10 8; }
@@ -291,10 +368,14 @@ class NetOrbitCard extends HTMLElement {
   .disc { fill:#0f172a; stroke-width:2.2; }
   .disc.dashed { stroke-dasharray:4 4; }
   .halo { opacity:.13; filter:url(#noblur); }
+  .sugring { fill:none; stroke:#fbbf24; stroke-width:2; stroke-dasharray:3 3; animation: spin 6s linear infinite; transform-box:fill-box; transform-origin:center; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .pin { fill:#60a5fa; stroke:#0f172a; stroke-width:1.5; }
   .pulse { animation: pulse 1.8s ease-in-out infinite; }
   @keyframes pulse { 50% { stroke-width:5; } }
   .ic { display:flex; align-items:center; justify-content:center; }
   .hlab { fill:#f1f5f9; font-size:15px; font-weight:600; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }
+  .hlab.glab { fill:#cbd5e1; font-size:13px; font-weight:500; }
   .hsub { fill:#94a3b8; font-size:12px; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }
   .dlab { fill:#cbd5e1; }
   .dev.recent .dlab { fill:#fde68a; }
@@ -303,31 +384,43 @@ class NetOrbitCard extends HTMLElement {
   .dev.sleepy:not(.online) { opacity:.7; }
   .zz { fill:#a78bfa; stroke:#0f172a; stroke-width:1.5; }
   .node { cursor:pointer; }
+  .node.draggable { cursor:grab; }
   .node:hover .disc { stroke-width:4; }
   .node:hover .dlab { fill:#fff; font-weight:600; }
-  .tip { position:absolute; pointer-events:none; background:rgba(15,23,42,.96); border:1px solid rgba(148,163,184,.25); border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.55; color:#e2e8f0; min-width:190px; box-shadow:0 10px 30px rgba(0,0,0,.45); opacity:0; transition:opacity .12s; z-index:2; }
+  .node.hub.hot .disc { stroke:#60a5fa !important; stroke-width:6; }
+  .ghost { fill:rgba(96,165,250,.25); stroke:#60a5fa; stroke-width:2; pointer-events:none; }
+  .tip { position:absolute; pointer-events:none; background:rgba(15,23,42,.96); border:1px solid rgba(148,163,184,.25); border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.55; color:#e2e8f0; min-width:190px; max-width:280px; box-shadow:0 10px 30px rgba(0,0,0,.45); opacity:0; transition:opacity .12s; z-index:2; }
   .tip b { font-size:13.5px; display:block; margin-bottom:2px; }
-  .tip .k { color:#94a3b8; display:inline-block; width:70px; }
-  .pop { position:absolute; background:rgba(15,23,42,.98); border:1px solid rgba(192,132,252,.5); border-radius:10px; padding:10px 12px; font-size:13px; color:#e2e8f0; z-index:3; min-width:200px; box-shadow:0 10px 30px rgba(0,0,0,.5); }
-  .pop .row { display:flex; gap:8px; margin-top:8px; }
-  .pop button { flex:1; font:inherit; padding:6px 10px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#1e293b; color:#e2e8f0; cursor:pointer; }
-  .pop button.go { background:#7c3aed; border-color:#7c3aed; }
+  .tip .k { color:#94a3b8; display:inline-block; width:74px; }
+  .pop { position:absolute; background:rgba(15,23,42,.98); border:1px solid rgba(96,165,250,.45); border-radius:12px; padding:12px; font-size:13px; color:#e2e8f0; z-index:3; width:250px; box-shadow:0 10px 30px rgba(0,0,0,.5); }
+  .pop b { display:block; font-size:14px; }
+  .pop .muted { color:#94a3b8; font-size:12px; margin-top:2px; }
+  .pop .row { display:flex; gap:8px; margin-top:10px; }
+  .pop label { display:block; color:#94a3b8; font-size:12px; margin-top:10px; }
+  .pop select, .pop input { width:100%; box-sizing:border-box; margin-top:4px; font:inherit; padding:6px 8px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#0b1220; color:#e2e8f0; }
+  .pop button { flex:1; font:inherit; padding:7px 10px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#1e293b; color:#e2e8f0; cursor:pointer; }
+  .pop button.go { background:#2563eb; border-color:#2563eb; }
+  .pop button.warn { border-color:rgba(248,113,113,.5); color:#fecaca; }
   .legend { display:flex; flex-wrap:wrap; gap:14px; padding:2px 18px 14px; font-size:12px; color:#94a3b8; }
   .legend span { display:inline-flex; align-items:center; gap:6px; }
   .legend .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
-  @media (prefers-reduced-motion: reduce) { .lk.live, .pulse { animation:none; } }
+  @media (prefers-reduced-motion: reduce) { .lk.live, .pulse, .sugring { animation:none; } }
 </style>
 <ha-card>
   <div class="head">
     <div class="title"><ha-icon icon="mdi:orbit"></ha-icon>${noEsc(cfg.title)}</div>
     ${chip("online")}${chip("recent")}${chip("stale")}${counts.new ? chip("new") : ""}
+    ${nSug ? `<span class="chip sug"><i style="background:#fbbf24"></i>${nSug} possible hub${nSug > 1 ? "s" : ""}</span>` : ""}
+    ${admin ? `<button class="editbtn ${edit ? "on" : ""}"><ha-icon icon="${edit ? "mdi:check" : "mdi:pencil"}"></ha-icon>${edit ? "Done" : "Edit layout"}</button>` : ""}
   </div>
+  ${edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename or remove it.</div>` : ""}
   <div class="wrap">
     <svg viewBox="-70 -40 1140 1090" role="img" aria-label="Network map">
       <defs><filter id="noblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>
       <circle class="ring" cx="${C.x}" cy="${C.y}" r="370"/>
       ${links}
       ${gfx}
+      <circle class="ghost" r="17" cx="-500" cy="-500"/>
     </svg>
     <div class="tip"></div>
   </div>
@@ -336,14 +429,27 @@ class NetOrbitCard extends HTMLElement {
     <span><i class="dot" style="background:${NO_STATUS.recent.color}"></i>Seen in the last ${noEsc(staleH)} h</span>
     <span><i class="dot" style="background:${NO_STATUS.stale.color}"></i>Not seen for ${noEsc(staleH)} h+</span>
     <span><i class="dot" style="background:#a78bfa"></i>Allowed to sleep</span>
+    ${nSug ? `<span><i class="dot" style="background:#fbbf24"></i>Might be a hub, tap to confirm</span>` : ""}
+    ${grouped ? `<span>Grouped by type until NetOrbit knows where they connect</span>` : ""}
   </div>` : ""}
 </ha-card>`;
 
+    const btn = this.shadowRoot.querySelector(".editbtn");
+    if (btn) btn.addEventListener("click", () => { this._edit = !this._edit; this._sig = ""; this.hass = this._hass; });
+    this._wire(model);
+  }
+
+  _wire(model) {
+    const { hubs, devices } = model;
     const all = {};
     Object.values(hubs).forEach((h) => (all[h.key] = h));
     devices.forEach((d) => (all[d.key] = d));
+    const root = model.root;
+    const col = (s) => (s === "group" ? "#64748b" : (NO_STATUS[s] || NO_STATUS.unknown).color);
     const tip = this.shadowRoot.querySelector(".tip");
     const wrap = this.shadowRoot.querySelector(".wrap");
+    const svg = this.shadowRoot.querySelector("svg");
+    const ghost = this.shadowRoot.querySelector(".ghost");
     const place = (el, ev, w, h) => {
       const r = wrap.getBoundingClientRect();
       let x = ev.clientX - r.left + 14, y = ev.clientY - r.top + 14;
@@ -351,55 +457,197 @@ class NetOrbitCard extends HTMLElement {
       if (y + h > r.height) y -= h + 20;
       el.style.left = Math.max(4, x) + "px"; el.style.top = Math.max(4, y) + "px";
     };
+    const toSvg = (ev) => {
+      const pt = svg.createSVGPoint();
+      pt.x = ev.clientX; pt.y = ev.clientY;
+      const m = svg.getScreenCTM();
+      return m ? pt.matrixTransform(m.inverse()) : { x: 0, y: 0 };
+    };
+    const nearestHub = (p) => {
+      let best = null, bestD = 75;
+      Object.values(hubs).forEach((h) => {
+        if (h.kind !== "hub") return;
+        const hp = this._pos[h.key];
+        if (!hp) return;
+        const d = Math.hypot(hp.x - p.x, hp.y - p.y);
+        if (d < bestD) { best = h; bestD = d; }
+      });
+      return best;
+    };
+
     this.shadowRoot.querySelectorAll(".node[data-key]").forEach((el) => {
       const n = all[el.dataset.key];
       if (!n) return;
       el.addEventListener("mouseenter", () => {
-        if (n.kind === "newhub") {
-          tip.innerHTML = `<b>New devices</b><div>Found on the network but not tracked yet.</div>`;
-        } else {
-          const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] ? hubs[n.link].label : "");
-          tip.innerHTML = `<b>${noEsc(n.label)}</b>` +
-            `<div><span class="k">Status</span><span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · sleeps" : ""}</div>` +
-            (n.ip ? `<div><span class="k">IP</span>${noEsc(n.ip)}</div>` : "") +
-            (n.mac ? `<div><span class="k">MAC</span>${noEsc(n.mac)}</div>` : "") +
-            (n.hostname && n.hostname !== n.label ? `<div><span class="k">Host</span>${noEsc(n.hostname)}</div>` : "") +
-            (via ? `<div><span class="k">Via</span>${noEsc(via)}</div>` : "") +
-            `<div><span class="k">Last seen</span>${n.status === "online" ? "now" : noRel(n.last_seen)}</div>`;
-        }
+        if (this._drag) return;
+        tip.innerHTML = this._tipHtml(n, hubs, col);
         tip.style.opacity = "1";
       });
-      el.addEventListener("mousemove", (ev) => place(tip, ev, 220, 150));
+      el.addEventListener("mousemove", (ev) => place(tip, ev, 230, 170));
       el.addEventListener("mouseleave", () => (tip.style.opacity = "0"));
+
+      el.addEventListener("pointerdown", (ev) => {
+        if (!this._edit || n.kind !== "device") return;
+        ev.preventDefault();
+        this._drag = { n, x0: ev.clientX, y0: ev.clientY, moved: false, id: ev.pointerId };
+        el.setPointerCapture(ev.pointerId);
+      });
+      el.addEventListener("pointermove", (ev) => {
+        const d = this._drag;
+        if (!d || d.id !== ev.pointerId) return;
+        if (!d.moved && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) < 6) return;
+        d.moved = true;
+        tip.style.opacity = "0";
+        const p = toSvg(ev);
+        ghost.setAttribute("cx", p.x); ghost.setAttribute("cy", p.y);
+        const h = nearestHub(p);
+        this.shadowRoot.querySelectorAll(".node.hub.hot").forEach((x) => x.classList.remove("hot"));
+        if (h) { const hel = this.shadowRoot.querySelector(`.node.hub[data-key="${CSS.escape(h.key)}"]`); if (hel) hel.classList.add("hot"); }
+        d.target = h;
+      });
+      const finish = (ev) => {
+        const d = this._drag;
+        if (!d || d.id !== ev.pointerId) return;
+        this._drag = null;
+        ghost.setAttribute("cx", -500); ghost.setAttribute("cy", -500);
+        this.shadowRoot.querySelectorAll(".node.hub.hot").forEach((x) => x.classList.remove("hot"));
+        if (d.moved) {
+          if (d.target && d.target.key !== d.n.link) this._call("assign_device", { device: [this._ref(d.n)], hub: d.target.key.replace(/^hub:/, "") });
+          else this._sig = "";
+          return;
+        }
+        this._devicePopup(d.n, ev, wrap, place, hubs);
+      };
+      el.addEventListener("pointerup", finish);
+      el.addEventListener("pointercancel", (ev) => { if (this._drag) { this._drag = null; ghost.setAttribute("cx", -500); } });
+
       el.addEventListener("click", (ev) => {
-        if (n.kind === "new") { this._popup(n, ev, wrap, place, isAdmin); return; }
+        if (this._edit && n.kind === "device") return; // handled by pointer events
+        if (n.suggested && this._isAdmin()) { this._suggestPopup(n, ev, wrap, place); return; }
+        if (n.kind === "new") { this._newPopup(n, ev, wrap, place); return; }
+        if (this._edit && n.kind === "hub") { this._hubPopup(n, ev, wrap, place, n.key === root); return; }
         if (n.entity) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: n.entity }, bubbles: true, composed: true }));
       });
     });
   }
 
-  _popup(n, ev, wrap, place, isAdmin) {
-    const old = wrap.querySelector(".pop");
-    if (old) old.remove();
+  _tipHtml(n, hubs, col) {
+    if (n.kind === "newhub") return `<b>New devices</b><div>Found on the network but not tracked yet, plus anything that might be a hub. Tap one to decide.</div>`;
+    if (n.kind === "group") return `<b>${noEsc(n.label)}</b><div>NetOrbit does not know which access point or switch these use yet. Use Edit layout, the NetOrbit settings, or an AI assistant to place them.</div>`;
+    const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
+    return `<b>${noEsc(n.label)}</b>` +
+      (n.suggested ? `<div style="color:#fde68a">Might be a ${noEsc((n.suggested.type || "hub").replace("_", " "))}: ${noEsc((n.suggested.reasons || []).join(", "))}</div>` : "") +
+      `<div><span class="k">Status</span><span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · sleeps" : ""}</div>` +
+      (n.ip ? `<div><span class="k">IP</span>${noEsc(n.ip)}</div>` : "") +
+      (n.mac ? `<div><span class="k">MAC</span>${noEsc(n.mac)}</div>` : "") +
+      (n.vendor ? `<div><span class="k">Maker</span>${noEsc(n.vendor)}</div>` : "") +
+      (n.hostname && n.hostname !== n.label ? `<div><span class="k">Host</span>${noEsc(n.hostname)}</div>` : "") +
+      (via ? `<div><span class="k">Via</span>${noEsc(via)}</div>` : "") +
+      (n.kind === "device" && n.placement ? `<div><span class="k">Placed</span>${noEsc(NO_PLACEMENT[n.placement] || n.placement)}</div>` : "") +
+      `<div><span class="k">Last seen</span>${n.status === "online" ? "now" : noRel(n.last_seen)}</div>`;
+  }
+
+  _ref(n) {
+    return (n.raw && (n.raw.mac || n.raw.ip)) || n.mac || n.ip || n.label;
+  }
+
+  _call(service, data) {
+    const entryId = this._summaryEntry();
+    if (entryId) data.config_entry_id = entryId;
+    this._sig = "";
+    return this._hass.callService("netorbit", service, data).catch((e) => {
+      console.error("NetOrbit:", e);
+      this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: `NetOrbit: ${e.message || e}` }, bubbles: true, composed: true }));
+    });
+  }
+
+  _openPop(html, ev, wrap, place, w = 250, h = 200) {
+    this._closePop(wrap);
     const pop = document.createElement("div");
     pop.className = "pop";
-    const entryId = this._summaryEntry();
-    pop.innerHTML = `<b>${noEsc(n.label)}</b><div style="color:#94a3b8">${noEsc(n.ip || "")} ${noEsc(n.mac || "")}</div>` +
-      (isAdmin
-        ? `<div class="row"><button class="go">Track</button><button class="ign">Ignore</button><button class="x">Close</button></div>`
-        : `<div style="margin-top:6px;color:#94a3b8">An admin can track or ignore this device.</div><div class="row"><button class="x">Close</button></div>`);
+    pop.innerHTML = html;
     wrap.appendChild(pop);
-    place(pop, ev, 240, 110);
-    const call = (svc) => {
-      const data = { mac: n.raw.mac || undefined, ip: n.raw.ip || undefined };
-      if (entryId) data.config_entry_id = entryId;
-      this._hass.callService("netorbit", svc, data).catch((e) => console.error("NetOrbit:", e));
-      pop.remove();
-    };
+    place(pop, ev, w, h);
+    this._popOpen = true;
+    pop.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => this._closePop(wrap)));
+    return pop;
+  }
+
+  _closePop(wrap) {
+    const old = wrap.querySelector(".pop");
+    if (old) old.remove();
+    if (this._popOpen) { this._popOpen = false; this._sig = ""; this.hass = this._hass; }
+  }
+
+  _hubOptions(hubs, current) {
+    const real = hubs[current] && hubs[current].kind === "hub";
+    return (real ? "" : `<option value="" selected disabled>Choose a hub…</option>`) +
+      Object.values(hubs).filter((h) => h.kind === "hub")
+        .sort((a, b) => String(a.label).localeCompare(String(b.label)))
+        .map((h) => `<option value="${noEsc(h.key.replace(/^hub:/, ""))}" ${h.key === current ? "selected" : ""}>${noEsc(h.label)}</option>`).join("");
+  }
+
+  _devicePopup(n, ev, wrap, place, hubs) {
+    const types = Object.entries(NO_HUB_TYPE).filter(([k]) => k !== "router").map(([k, v]) => `<option value="${k}" ${k === "access_point" ? "selected" : ""}>${v}</option>`).join("");
+    const pop = this._openPop(
+      `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(NO_PLACEMENT[n.placement] || "")}</div>` +
+      `<label>Connects through<select class="hub">${this._hubOptions(hubs, n.link)}</select></label>` +
+      `<div class="row"><button class="go move">Move</button>${n.placement === "manual" ? `<button class="reset">Automatic</button>` : ""}</div>` +
+      `<label>Or this device is itself a<select class="type">${types}</select></label>` +
+      `<div class="row"><button class="mk">Make it a hub</button><button class="x">Close</button></div>`,
+      ev, wrap, place, 250, 260
+    );
     const q = (s) => pop.querySelector(s);
-    if (q(".go")) q(".go").addEventListener("click", () => call("track_device"));
-    if (q(".ign")) q(".ign").addEventListener("click", () => call("ignore_device"));
-    q(".x").addEventListener("click", () => pop.remove());
+    q(".move").addEventListener("click", () => {
+      const hub = q(".hub").value;
+      if (!hub) { q(".hub").focus(); return; }
+      this._closePop(wrap);
+      this._call("assign_device", { device: [this._ref(n)], hub });
+    });
+    if (q(".reset")) q(".reset").addEventListener("click", () => { this._closePop(wrap); this._call("reset_placement", { device: [this._ref(n)] }); });
+    q(".mk").addEventListener("click", () => { const t = q(".type").value; this._closePop(wrap); this._call("confirm_hub", { device: this._ref(n), type: t }); });
+  }
+
+  _hubPopup(n, ev, wrap, place, isRoot) {
+    const pop = this._openPop(
+      `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(NO_HUB_TYPE[n.hub_type] || "Hub")}</div>` +
+      `<label>Name<input class="name" value="${noEsc(n.label)}"></label>` +
+      `<div class="row"><button class="go save">Save</button>${isRoot ? "" : `<button class="warn rm">Remove</button>`}<button class="x">Close</button></div>`,
+      ev, wrap, place, 250, 160
+    );
+    const q = (s) => pop.querySelector(s);
+    q(".save").addEventListener("click", () => {
+      const name = q(".name").value.trim();
+      this._closePop(wrap);
+      if (name && name !== n.label) this._call("update_hub", { hub: n.key.replace(/^hub:/, ""), name });
+    });
+    if (q(".rm")) q(".rm").addEventListener("click", () => { this._closePop(wrap); this._call("remove_hub", { hub: n.key.replace(/^hub:/, "") }); });
+  }
+
+  _suggestPopup(n, ev, wrap, place) {
+    const s = n.suggested;
+    const pop = this._openPop(
+      `<b>${noEsc(n.label)}</b><div class="muted">NetOrbit thinks this is a ${noEsc((s.type || "hub").replace("_", " "))} because it is ${noEsc((s.reasons || []).join(", "))}.</div>` +
+      `<div class="row"><button class="go yes">It's a hub</button><button class="no">Not a hub</button></div><div class="row"><button class="x">Close</button></div>`,
+      ev, wrap, place, 250, 170
+    );
+    const q = (sel) => pop.querySelector(sel);
+    q(".yes").addEventListener("click", () => { this._closePop(wrap); this._call("confirm_hub", { device: s.key, type: s.type || "access_point" }); });
+    q(".no").addEventListener("click", () => { this._closePop(wrap); this._call("dismiss_hub", { device: s.key }); });
+  }
+
+  _newPopup(n, ev, wrap, place) {
+    const admin = this._isAdmin();
+    const pop = this._openPop(
+      `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(n.ip || "")} ${noEsc(n.vendor || "")}</div>` +
+      (admin
+        ? `<div class="row"><button class="go track">Track</button><button class="ign">Ignore</button><button class="x">Close</button></div>`
+        : `<div class="muted" style="margin-top:8px">An admin can track or ignore this device.</div><div class="row"><button class="x">Close</button></div>`),
+      ev, wrap, place, 250, 120
+    );
+    const q = (s) => pop.querySelector(s);
+    if (q(".track")) q(".track").addEventListener("click", () => { this._closePop(wrap); this._call("track_device", { mac: n.raw.mac || undefined, ip: n.raw.ip || undefined }); });
+    if (q(".ign")) q(".ign").addEventListener("click", () => { this._closePop(wrap); this._call("ignore_device", { mac: n.raw.mac || undefined, ip: n.raw.ip || undefined }); });
   }
 
   _summaryEntry() {
@@ -419,5 +667,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");

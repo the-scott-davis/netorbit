@@ -64,3 +64,19 @@ test("large networks stagger device rings", () => {
   const radii = new Set(m.devices.map((d) => Math.round(L.pos[d.key].r)));
   assert.strictEqual(radii.size, 2);
 });
+
+test("devices are grouped by type from their icon", () => {
+  const { noGroupFor } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+  assert.strictEqual(noGroupFor("mdi:television"), "media");
+  assert.strictEqual(noGroupFor("mdi:laptop"), "computers");
+  assert.strictEqual(noGroupFor("mdi:cctv"), "cameras");
+  assert.strictEqual(noGroupFor("mdi:thermostat"), "home");
+  assert.strictEqual(noGroupFor("mdi:lan-connect"), "other");
+});
+
+test("group hubs sit near their devices, not in the middle", () => {
+  const hubs = { r: { key: "r", label: "Router" }, g: { key: "g", parent: "r", label: "TVs", kind: "group" } };
+  const devices = [1, 2, 3].map((i) => ({ key: "d" + i, link: "g", label: "TV " + i }));
+  const L = netorbitLayout({ hubs, devices, root: "r" });
+  assert.ok(Math.hypot(L.pos.g.x - 500, L.pos.g.y - 500) > 200);
+});

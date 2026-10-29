@@ -9,24 +9,33 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
+from . import actions
 from .const import (
     CARD_FILENAME,
     CARD_URL,
-    CONF_DEVICES,
-    CONF_IGNORED,
     DOMAIN,
+    HUB_TYPES,
+    SERVICE_ADD_HUB,
+    SERVICE_ASSIGN,
+    SERVICE_CONFIRM_HUB,
+    SERVICE_DISMISS_HUB,
     SERVICE_IGNORE,
+    SERVICE_IMPORT_LIST,
+    SERVICE_REMOVE_HUB,
+    SERVICE_RESET,
     SERVICE_SCAN,
     SERVICE_TRACK,
+    SERVICE_UPDATE_HUB,
     VERSION,
 )
 from .coordinator import NetOrbitCoordinator
+from .manage import ManageError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,68 +44,74 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type NetOrbitConfigEntry = ConfigEntry[NetOrbitCoordinator]
 
-_TARGET = {
-    vol.Optional("mac"): cv.string,
-    vol.Optional("ip"): cv.string,
-    vol.Optional("config_entry_id"): cv.string,
+ENTRY = {vol.Optional("config_entry_id"): cv.string}
+DEVICE_LIST = vol.All(cv.ensure_list, [cv.string])
+
+SCHEMAS: dict[str, vol.Schema] = {
+    SERVICE_TRACK: vol.Schema({**ENTRY, vol.Optional("mac"): cv.string, vol.Optional("ip"): cv.string,
+                               vol.Optional("name"): cv.string, vol.Optional("icon"): cv.icon,
+                               vol.Optional("hub"): cv.string, vol.Optional("sleepy"): cv.boolean}),
+    SERVICE_IGNORE: vol.Schema({**ENTRY, vol.Optional("mac"): cv.string, vol.Optional("ip"): cv.string,
+                                vol.Optional("device"): cv.string}),
+    SERVICE_SCAN: vol.Schema(ENTRY),
+    SERVICE_ASSIGN: vol.Schema({**ENTRY, vol.Required("device"): DEVICE_LIST, vol.Required("hub"): cv.string}),
+    SERVICE_RESET: vol.Schema({**ENTRY, vol.Required("device"): DEVICE_LIST}),
+    SERVICE_ADD_HUB: vol.Schema({**ENTRY, vol.Optional("name"): cv.string, vol.Optional("type", default="access_point"): vol.In(HUB_TYPES),
+                                 vol.Optional("parent"): cv.string, vol.Optional("ip"): cv.string,
+                                 vol.Optional("mac"): cv.string, vol.Optional("device"): cv.string}),
+    SERVICE_REMOVE_HUB: vol.Schema({**ENTRY, vol.Required("hub"): cv.string}),
+    SERVICE_UPDATE_HUB: vol.Schema({**ENTRY, vol.Required("hub"): cv.string, vol.Optional("name"): cv.string,
+                                    vol.Optional("type"): vol.In(HUB_TYPES), vol.Optional("parent"): cv.string}),
+    SERVICE_IMPORT_LIST: vol.Schema({**ENTRY, vol.Required("hub"): cv.string, vol.Required("text"): cv.string,
+                                     vol.Optional("add_missing", default=True): cv.boolean}),
+    SERVICE_CONFIRM_HUB: vol.Schema({**ENTRY, vol.Required("device"): cv.string,
+                                     vol.Optional("type"): vol.In(HUB_TYPES), vol.Optional("name"): cv.string}),
+    SERVICE_DISMISS_HUB: vol.Schema({**ENTRY, vol.Required("device"): cv.string}),
 }
-TRACK_SCHEMA = vol.Schema(
-    {
-        **_TARGET,
-        vol.Optional("name"): cv.string,
-        vol.Optional("icon"): cv.icon,
-        vol.Optional("hub"): cv.string,
-        vol.Optional("sleepy"): cv.boolean,
-    }
-)
-IGNORE_SCHEMA = vol.Schema(_TARGET)
-SCAN_SCHEMA = vol.Schema({vol.Optional("config_entry_id"): cv.string})
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the card and the services once."""
+    """Register the card, the services and the AI tools once."""
     await _register_card(hass)
 
-    async def _track(call: ServiceCall) -> None:
-        entry, coord = _resolve(hass, call)
-        key = coord.find_key(call.data.get("mac"), call.data.get("ip"))
-        if key is None:
-            if not call.data.get("ip"):
-                raise ServiceValidationError("Give a MAC or IP address")
-            key = f"ip:{call.data['ip']}"
-        devices = dict(entry.options.get(CONF_DEVICES, {}))
-        cfg = dict(devices.get(key, {}))
-        cfg["tracked"] = True
-        if call.data.get("ip"):
-            cfg["host"] = call.data["ip"]
-        for field in ("name", "icon", "hub", "sleepy"):
-            if field in call.data:
-                cfg[field] = call.data[field]
-        devices[key] = cfg
-        ignored = [k for k in entry.options.get(CONF_IGNORED, []) if k != key]
-        hass.config_entries.async_update_entry(
-            entry, options={**entry.options, CONF_DEVICES: devices, CONF_IGNORED: ignored}
+    def handler(fn):
+        async def _handle(call: ServiceCall) -> ServiceResponse:
+            entry, coord = resolve_entry(hass, call.data.get("config_entry_id"))
+            args = {k: v for k, v in call.data.items() if k != "config_entry_id"}
+            try:
+                result = await fn(entry, coord, args)
+            except ManageError as err:
+                raise ServiceValidationError(str(err)) from err
+            return result if call.return_response else None
+
+        return _handle
+
+    async def _scan(entry, coord, args):
+        coord.request_sweep(probe=True)
+        await coord.async_refresh()
+        return {"devices": len(coord.data.nodes) if coord.data else 0}
+
+    table = {
+        SERVICE_TRACK: lambda e, c, a: actions.track(hass, e, c, **a),
+        SERVICE_IGNORE: lambda e, c, a: actions.ignore(hass, e, c, **a),
+        SERVICE_SCAN: _scan,
+        SERVICE_ASSIGN: lambda e, c, a: actions.assign(hass, e, c, a["device"], a["hub"]),
+        SERVICE_RESET: lambda e, c, a: actions.reset(hass, e, c, a["device"]),
+        SERVICE_ADD_HUB: lambda e, c, a: actions.add_hub(hass, e, c, a.get("name"), a.get("type"), a.get("parent"), a.get("ip"), a.get("mac"), a.get("device")),
+        SERVICE_REMOVE_HUB: lambda e, c, a: actions.remove_hub(hass, e, c, a["hub"]),
+        SERVICE_UPDATE_HUB: lambda e, c, a: actions.update_hub(hass, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent")),
+        SERVICE_IMPORT_LIST: lambda e, c, a: actions.import_list(hass, e, c, a["hub"], a["text"], a["add_missing"]),
+        SERVICE_CONFIRM_HUB: lambda e, c, a: actions.confirm_hub(hass, e, c, a["device"], a.get("type"), a.get("name")),
+        SERVICE_DISMISS_HUB: lambda e, c, a: actions.dismiss_hub(hass, e, c, a["device"]),
+    }
+    for name, fn in table.items():
+        async_register_admin_service(
+            hass, DOMAIN, name, handler(fn), SCHEMAS[name], supports_response=SupportsResponse.OPTIONAL
         )
 
-    async def _ignore(call: ServiceCall) -> None:
-        entry, coord = _resolve(hass, call)
-        key = coord.find_key(call.data.get("mac"), call.data.get("ip"))
-        if key is None:
-            raise ServiceValidationError("Device not found")
-        ignored = list(dict.fromkeys([*entry.options.get(CONF_IGNORED, []), key]))
-        devices = {k: v for k, v in entry.options.get(CONF_DEVICES, {}).items() if k != key}
-        hass.config_entries.async_update_entry(
-            entry, options={**entry.options, CONF_DEVICES: devices, CONF_IGNORED: ignored}
-        )
+    from .llm_api import async_register_llm_api  # noqa: PLC0415
 
-    async def _scan(call: ServiceCall) -> None:
-        _entry, coord = _resolve(hass, call)
-        coord.request_sweep()
-        await coord.async_request_refresh()
-
-    async_register_admin_service(hass, DOMAIN, SERVICE_TRACK, _track, TRACK_SCHEMA)
-    async_register_admin_service(hass, DOMAIN, SERVICE_IGNORE, _ignore, IGNORE_SCHEMA)
-    async_register_admin_service(hass, DOMAIN, SERVICE_SCAN, _scan, SCAN_SCHEMA)
+    async_register_llm_api(hass)
     return True
 
 
@@ -119,20 +134,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: NetOrbitConfigEntry) ->
 async def _options_updated(hass: HomeAssistant, entry: NetOrbitConfigEntry) -> None:
     coordinator = entry.runtime_data
     coordinator.apply_options(entry)
+    if coordinator.internal_update:
+        # The change came from NetOrbit itself, which already refreshed.
+        coordinator.internal_update = False
+        return
     await coordinator.async_refresh()
 
 
-def _resolve(hass: HomeAssistant, call: ServiceCall) -> tuple[NetOrbitConfigEntry, NetOrbitCoordinator]:
-    entries = [
-        e for e in hass.config_entries.async_entries(DOMAIN)
-        if e.state is ConfigEntryState.LOADED
-    ]
-    wanted = call.data.get("config_entry_id")
-    if wanted:
-        entries = [e for e in entries if e.entry_id == wanted]
+def resolve_entry(hass: HomeAssistant, entry_id: str | None) -> tuple[NetOrbitConfigEntry, NetOrbitCoordinator]:
+    """The loaded NetOrbit entry to act on."""
+    entries = [e for e in hass.config_entries.async_entries(DOMAIN) if e.state is ConfigEntryState.LOADED]
+    if entry_id:
+        entries = [e for e in entries if e.entry_id == entry_id]
     if not entries:
         raise ServiceValidationError("No loaded NetOrbit entry found")
-    if len(entries) > 1 and not wanted:
+    if len(entries) > 1 and not entry_id:
         raise ServiceValidationError("More than one NetOrbit entry; pass config_entry_id")
     return entries[0], entries[0].runtime_data
 

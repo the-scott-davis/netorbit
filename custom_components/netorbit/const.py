@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "netorbit"
-VERSION: Final = "0.1.0"
+VERSION: Final = "0.2.0"
 
 # Config entry data
 CONF_SUBNET: Final = "subnet"
@@ -20,6 +20,11 @@ CONF_IGNORE_RANDOM_MAC: Final = "ignore_random_mac"
 CONF_HUBS: Final = "hubs"
 CONF_DEVICES: Final = "devices"
 CONF_IGNORED: Final = "ignored"
+CONF_AUTO_HUBS: Final = "auto_hubs"
+CONF_DISMISSED_HUBS: Final = "dismissed_hubs"
+CONF_SNMP_ENABLED: Final = "snmp_enabled"
+CONF_SNMP_COMMUNITY: Final = "snmp_community"
+CONF_GROUP_BY_TYPE: Final = "group_by_type"
 
 MODE_AUTO: Final = "auto"
 MODE_MANUAL: Final = "manual"
@@ -30,6 +35,10 @@ DEFAULT_PING_INTERVAL: Final = 60
 DEFAULT_DISCOVERY_INTERVAL: Final = 300
 DEFAULT_STALE_HOURS: Final = 24
 DEFAULT_IGNORE_RANDOM_MAC: Final = True
+DEFAULT_AUTO_HUBS: Final = True
+DEFAULT_SNMP_ENABLED: Final = True
+SNMP_DEFAULT_COMMUNITY: Final = "public"
+SNMP_PROBE_INTERVAL_S: Final = 3600
 
 MIN_PING_INTERVAL: Final = 10
 MAX_HOSTS: Final = 1024
@@ -50,6 +59,12 @@ HUB_ICONS: Final = {
 }
 ROOT_HUB_ID: Final = "gateway"
 
+# Where a device's hub placement came from
+PLACE_MANUAL: Final = "manual"
+PLACE_CONTROLLER: Final = "controller"
+PLACE_SNMP: Final = "snmp"
+PLACE_NONE: Final = "none"
+
 # Status values
 STATUS_ONLINE: Final = "online"
 STATUS_RECENT: Final = "recent"
@@ -65,6 +80,14 @@ EVENT_DEVICE_RECOVERED: Final = f"{DOMAIN}_device_recovered"
 SERVICE_TRACK: Final = "track_device"
 SERVICE_IGNORE: Final = "ignore_device"
 SERVICE_SCAN: Final = "scan_now"
+SERVICE_ASSIGN: Final = "assign_device"
+SERVICE_ADD_HUB: Final = "add_hub"
+SERVICE_REMOVE_HUB: Final = "remove_hub"
+SERVICE_UPDATE_HUB: Final = "update_hub"
+SERVICE_IMPORT_LIST: Final = "import_client_list"
+SERVICE_CONFIRM_HUB: Final = "confirm_hub"
+SERVICE_DISMISS_HUB: Final = "dismiss_hub"
+SERVICE_RESET: Final = "reset_placement"
 
 # Frontend
 CARD_URL: Final = f"/{DOMAIN}/netorbit-card.js"

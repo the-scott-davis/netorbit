@@ -1,4 +1,4 @@
-"""Discovery, ping and status tracking for NetOrbit."""
+"""Discovery, hub detection, layout inference, ping and status tracking for NetOrbit."""
 
 from __future__ import annotations
 
@@ -16,35 +16,53 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from . import manage
 from .const import (
+    CONF_AUTO_HUBS,
     CONF_DEVICES,
     CONF_DISCOVERY_INTERVAL,
+    CONF_DISMISSED_HUBS,
     CONF_GATEWAY,
+    CONF_GROUP_BY_TYPE,
     CONF_HUBS,
     CONF_IGNORE_RANDOM_MAC,
     CONF_IGNORED,
     CONF_MODE,
     CONF_PING_INTERVAL,
+    CONF_SNMP_COMMUNITY,
+    CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
     CONF_SUBNET,
+    DEFAULT_AUTO_HUBS,
     DEFAULT_DISCOVERY_INTERVAL,
     DEFAULT_IGNORE_RANDOM_MAC,
     DEFAULT_MODE,
     DEFAULT_PING_INTERVAL,
+    DEFAULT_SNMP_ENABLED,
     DEFAULT_STALE_HOURS,
     DOMAIN,
     EVENT_DEVICE_RECOVERED,
     EVENT_DEVICE_STALE,
     EVENT_NEW_DEVICE,
+    HUB_AP,
     HUB_ICONS,
+    HUB_MESH,
     HUB_OTHER,
     HUB_ROUTER,
+    HUB_SWITCH,
     MODE_AUTO,
+    PLACE_CONTROLLER,
+    PLACE_MANUAL,
+    PLACE_NONE,
+    PLACE_SNMP,
     ROOT_HUB_ID,
+    SNMP_DEFAULT_COMMUNITY,
+    SNMP_PROBE_INTERVAL_S,
     STATUS_ONLINE,
     STATUS_STALE,
     STORAGE_VERSION,
 )
+from .detect import Evidence, classify, pretty_vendor
 from .logic import (
     compute_status,
     fallback_name,
@@ -55,6 +73,9 @@ from .logic import (
     short_hostname,
     subnet_hosts,
 )
+from .snmp import SnmpClient
+from .sources import client_access_points, registry_by_mac, ssdp_types_by_ip
+from .topology import Topology, infer, macs_close
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +84,8 @@ PING_TIMEOUT = 1.5
 SWEEP_TIMEOUT = 1.0
 DNS_TIMEOUT = 2.0
 DNS_REFRESH = timedelta(hours=12)
+AUTO_PLACEMENT_TTL = timedelta(days=7)
+SNMP_CONCURRENCY = 32
 
 
 @dataclass
@@ -83,9 +106,11 @@ class Node:
     hostname: str | None = None
     source: str = "discovered"  # discovered | manual | hub
     hub_type: str | None = None
+    vendor: str | None = None
+    placement: str = PLACE_NONE  # manual | controller | snmp | none
+    hub_source: str | None = None  # for hubs: manual | snmp | controller | detected
 
     def as_dict(self) -> dict[str, Any]:
-        """Dict form for diagnostics and the card."""
         return asdict(self)
 
 
@@ -95,8 +120,9 @@ class NetOrbitData:
 
     nodes: dict[str, Node] = field(default_factory=dict)
     new_devices: list[dict[str, Any]] = field(default_factory=list)
+    suggested_hubs: list[dict[str, Any]] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
     last_scan: str | None = None
-    scanning_supported: bool = True
 
 
 def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
@@ -107,9 +133,14 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_DISCOVERY_INTERVAL, DEFAULT_DISCOVERY_INTERVAL)
     opts.setdefault(CONF_STALE_HOURS, DEFAULT_STALE_HOURS)
     opts.setdefault(CONF_IGNORE_RANDOM_MAC, DEFAULT_IGNORE_RANDOM_MAC)
+    opts.setdefault(CONF_AUTO_HUBS, DEFAULT_AUTO_HUBS)
+    opts.setdefault(CONF_SNMP_ENABLED, DEFAULT_SNMP_ENABLED)
+    opts.setdefault(CONF_SNMP_COMMUNITY, "")
+    opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_HUBS, [])
     opts.setdefault(CONF_DEVICES, {})
     opts.setdefault(CONF_IGNORED, [])
+    opts.setdefault(CONF_DISMISSED_HUBS, [])
     if not any(h.get("id") == ROOT_HUB_ID for h in opts[CONF_HUBS]):
         opts[CONF_HUBS] = [
             {"id": ROOT_HUB_ID, "name": "Router", "host": entry.data[CONF_GATEWAY], "type": HUB_ROUTER, "parent": None},
@@ -137,10 +168,19 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._seen: dict[str, dict[str, Any]] = {}
         self._initialized = False
         self._last_sweep: datetime | None = None
+        self._last_snmp_probe: datetime | None = None
         self._prev_status: dict[str, str] = {}
         self._force_sweep = False
+        self._force_probe = False
         self._privileged: bool | None = None
         self._sweep_lock = asyncio.Lock()
+        self._snmp = SnmpClient(hass)
+        self._tables: dict[str, dict[str, int]] = {}
+        self._topology = Topology()
+        self._controller_ap: dict[str, str] = {}
+        self._suggestions: list[dict[str, Any]] = []
+        self._registry: dict[str, Any] = {}
+        self.internal_update = False
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -168,13 +208,17 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     @callback
     def apply_options(self, entry: ConfigEntry) -> None:
         """Use new options without reloading the entry."""
+        old_comm = self.opts.get(CONF_SNMP_COMMUNITY)
         self.opts = options_with_defaults(entry)
         self.update_interval = timedelta(seconds=self.opts[CONF_PING_INTERVAL])
-        self._force_sweep = False
+        if self.opts.get(CONF_SNMP_COMMUNITY) != old_comm:
+            self._force_probe = True
+            self._force_sweep = True
 
-    def request_sweep(self) -> None:
-        """Run a discovery sweep on the next update."""
+    def request_sweep(self, probe: bool = False) -> None:
+        """Run a discovery sweep (and optionally an SNMP probe) on the next update."""
         self._force_sweep = True
+        self._force_probe = self._force_probe or probe
 
     def _save(self) -> None:
         self._store.async_delay_save(lambda: {"seen": self._seen, "initialized": self._initialized}, 10)
@@ -202,13 +246,14 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             rec["last_seen"] = now.isoformat()
             if ip:
                 rec["ip"] = ip
+        self._controller_ap = client_access_points(self.hass)
         self._save()
         data = self._build(now, {k for k, _ in alive})
         self._fire_transitions(data)
         return data
 
     async def _sweep(self, now: datetime) -> None:
-        """Ping every address once, then read the ARP table to learn MACs."""
+        """Ping every address, read ARP, then work out hubs and layout."""
         from icmplib import async_multiping  # noqa: PLC0415
 
         async with self._sweep_lock:
@@ -219,13 +264,19 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             )
             replied = {h.address for h in results if h.is_alive}
             arp = await self.hass.async_add_executor_job(_read_arp)
-            hub_ips = {h.get("host") for h in self.opts[CONF_HUBS]}
             ignored = set(self.opts[CONF_IGNORED])
             first_run = not self._initialized
             fresh: list[str] = []
+            host_set = self._subnet_set(hosts)
+
+            # Hubs learn their MAC from ARP too.
+            for hub in self.opts[CONF_HUBS]:
+                mac = arp.get(hub.get("host") or "")
+                if mac:
+                    self._seen.setdefault(f"hub:{hub['id']}", {"first_seen": now.isoformat()})["mac"] = mac
 
             for ip in sorted(set(arp) | replied, key=_ip_sort):
-                if ip in hub_ips or ip not in self._subnet_set(hosts):
+                if ip not in host_set:
                     continue
                 mac = arp.get(ip)
                 if mac is None:
@@ -236,14 +287,23 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 rec = self._seen.get(key)
                 if rec is None:
                     rec = self._seen[key] = {"first_seen": now.isoformat(), "discovered": True}
-                    if key not in ignored:
+                    if key not in ignored and not self._is_hub_address(mac, ip):
                         fresh.append(key)
                 rec["mac"] = mac
                 rec["ip"] = ip
                 if ip in replied:
                     rec["last_seen"] = now.isoformat()
 
+            await self._lookup_vendors()
             await self._resolve_names(now)
+            self._registry = registry_by_mac(self.hass)
+            if self.opts[CONF_SNMP_ENABLED]:
+                await self._snmp_probe(now, replied | set(arp))
+            await self._detect_hubs()
+            # Read tables after detection so switches found in this sweep count straight away.
+            self._tables = await self._read_tables() if self.opts[CONF_SNMP_ENABLED] else {}
+            self._infer_layout(now)
+
             self._last_sweep = now
             self._initialized = True
             self._save()
@@ -262,6 +322,22 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             cached = (self.subnet, set(hosts))
             self._hosts_cache = cached
         return cached[1]
+
+    async def _lookup_vendors(self) -> None:
+        todo = [rec for rec in self._seen.values() if rec.get("mac") and "vendor" not in rec]
+        if not todo:
+            return
+        try:
+            import aiooui  # noqa: PLC0415
+
+            if not aiooui.is_loaded():
+                await aiooui.async_load()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Vendor lookup unavailable: %s", err)
+            return
+        for rec in todo:
+            mac = rec["mac"]
+            rec["vendor"] = None if is_random_mac(mac) else pretty_vendor(aiooui.get_vendor(mac[:8].upper()))
 
     async def _resolve_names(self, now: datetime) -> None:
         """Reverse DNS for devices we have no recent hostname for."""
@@ -291,6 +367,187 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     rec["hostname"] = host
 
         await asyncio.gather(*(one(k, ip) for k, ip in todo))
+
+    # ----- SNMP ----------------------------------------------------------------
+
+    def _communities(self) -> list[str]:
+        custom = (self.opts.get(CONF_SNMP_COMMUNITY) or "").strip()
+        out = [custom] if custom else []
+        if SNMP_DEFAULT_COMMUNITY not in out:
+            out.append(SNMP_DEFAULT_COMMUNITY)
+        return out
+
+    async def _snmp_probe(self, now: datetime, live_ips: set[str]) -> None:
+        """Hourly: ask every live host whether it speaks SNMP and keeps a MAC table."""
+        probe_due = (
+            self._force_probe
+            or self._last_snmp_probe is None
+            or now - self._last_snmp_probe >= timedelta(seconds=SNMP_PROBE_INTERVAL_S)
+        )
+        by_ip = {rec.get("ip"): key for key, rec in self._seen.items() if rec.get("ip")}
+        hub_hosts = {h.get("host"): f"hub:{h['id']}" for h in self.opts[CONF_HUBS] if h.get("host")}
+        if probe_due:
+            self._force_probe = False
+            self._last_snmp_probe = now
+            sem = asyncio.Semaphore(SNMP_CONCURRENCY)
+
+            async def probe(ip: str) -> None:
+                async with sem:
+                    for i, comm in enumerate(self._communities()):
+                        res = await self._snmp.probe(ip, comm)
+                        if res:
+                            for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
+                                rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
+                                rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "community": "custom" if (i == 0 and self.opts.get(CONF_SNMP_COMMUNITY)) else "default"}
+                            return
+                    for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
+                        self._seen.get(key, {}).pop("snmp", None)
+
+            await asyncio.gather(*(probe(ip) for ip in sorted(live_ips | set(hub_hosts))))
+
+    async def _read_tables(self) -> dict[str, dict[str, int]]:
+        """Read MAC tables from every hub that is a bridge."""
+        tables: dict[str, dict[str, int]] = {}
+        for hub in self.opts[CONF_HUBS]:
+            host = hub.get("host")
+            info = self._snmp_info(hub)
+            if not host or not info or not info.get("bridge"):
+                continue
+            comm = self._communities()[0] if info.get("community") == "custom" else SNMP_DEFAULT_COMMUNITY
+            table = await self._snmp.mac_table(host, comm)
+            if table:
+                tables[hub["id"]] = table
+        return tables
+
+    def _snmp_info(self, hub: dict[str, Any]) -> dict[str, Any] | None:
+        info = (self._seen.get(f"hub:{hub['id']}") or {}).get("snmp")
+        if info:
+            return info
+        mac = hub.get("mac") or (self._seen.get(f"hub:{hub['id']}") or {}).get("mac")
+        return (self._seen.get(mac) or {}).get("snmp") if mac else None
+
+    # ----- hub detection ------------------------------------------------------
+
+    def _hub_macs(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for hub in self.opts[CONF_HUBS]:
+            mac = hub.get("mac") or (self._seen.get(f"hub:{hub['id']}") or {}).get("mac")
+            if mac:
+                out[hub["id"]] = mac
+        return out
+
+    def _is_hub_address(self, mac: str | None, ip: str | None) -> bool:
+        hub_macs = set(self._hub_macs().values())
+        hub_ips = {h.get("host") for h in self.opts[CONF_HUBS] if h.get("host")}
+        return bool((mac and mac in hub_macs) or (ip and ip in hub_ips))
+
+    def _hub_for_mac(self, mac: str | None) -> str | None:
+        if not mac:
+            return None
+        for hub_id, hmac in self._hub_macs().items():
+            if macs_close(hmac, mac):
+                return hub_id
+        return None
+
+    async def _detect_hubs(self) -> None:
+        """Add obvious hubs, and collect less certain ones as suggestions."""
+        ssdp = await ssdp_types_by_ip(self.hass)
+        dismissed = set(self.opts[CONF_DISMISSED_HUBS])
+        ignored = set(self.opts[CONF_IGNORED])
+        adds: list[dict[str, Any]] = []
+        suggestions: list[dict[str, Any]] = []
+
+        candidates: dict[str, dict[str, Any]] = {}
+        for key, rec in self._seen.items():
+            if key.startswith("hub:") or not rec.get("mac") or not rec.get("discovered"):
+                continue
+            candidates[rec["mac"]] = rec
+        # APs that a controller integration reports clients against are hubs by definition.
+        controller_aps = set(client_access_points(self.hass).values())
+
+        for mac, rec in candidates.items():
+            if mac in dismissed or mac in ignored or self._is_hub_address(mac, rec.get("ip")):
+                continue
+            reg = self._registry.get(mac)
+            snmp = rec.get("snmp") or {}
+            ev = Evidence(
+                mac=mac, ip=rec.get("ip"), hostname=rec.get("hostname"), vendor=rec.get("vendor"),
+                registry_model=reg.model if reg else None, registry_name=reg.name if reg else None,
+                registry_domain=reg.domain if reg else None, snmp_bridge=bool(snmp.get("bridge")),
+                snmp_descr=snmp.get("descr"), ssdp_types=ssdp.get(rec.get("ip") or "", []),
+            )
+            verdict = classify(ev)
+            if any(macs_close(mac, ap) for ap in controller_aps):
+                verdict.score += 3
+                verdict.hub_type = verdict.hub_type or HUB_AP
+                verdict.reasons.append("clients connect through it")
+            if rec.get("ip") == self.config_entry.data[CONF_GATEWAY]:
+                continue
+            name = self._hub_name(mac, rec, verdict.hub_type)
+            if verdict.auto and self.opts[CONF_AUTO_HUBS]:
+                source = "snmp" if ev.snmp_bridge else "controller" if reg and reg.domain else "detected"
+                adds.append({"name": name, "type": verdict.hub_type, "host": rec.get("ip"), "mac": mac, "source": source})
+            elif verdict.suggest or (verdict.auto and not self.opts[CONF_AUTO_HUBS]):
+                suggestions.append({
+                    "key": mac, "mac": mac.upper(), "ip": rec.get("ip"), "name": name,
+                    "type": verdict.hub_type, "reasons": verdict.reasons,
+                })
+        self._suggestions = suggestions
+
+        if adds:
+            opts = manage.copy_options(self.opts)
+            added = []
+            for a in adds:
+                try:
+                    manage.add_hub(opts, a["name"], a["type"], None, a["host"], a["mac"], source=a["source"])
+                    added.append(a["name"])
+                except manage.ManageError:
+                    continue
+            if added:
+                _LOGGER.info("NetOrbit added hubs: %s", ", ".join(added))
+                self.opts = opts
+                self.internal_update = True
+                self.hass.config_entries.async_update_entry(self.config_entry, options=opts)
+
+    def _hub_name(self, mac: str, rec: dict[str, Any], hub_type: str | None) -> str:
+        reg = self._registry.get(mac)
+        if reg and reg.name:
+            return reg.name
+        snmp_name = (rec.get("snmp") or {}).get("name")
+        if snmp_name:
+            return snmp_name
+        if rec.get("hostname"):
+            return rec["hostname"]
+        kind = {HUB_AP: "access point", HUB_SWITCH: "switch", HUB_MESH: "mesh node"}.get(hub_type or "", "hub")
+        vendor = rec.get("vendor")
+        return f"{vendor} {kind} {mac[-5:].upper()}" if vendor else f"{kind.capitalize()} {mac[-5:].upper()}"
+
+    # ----- layout ----------------------------------------------------------------
+
+    def _infer_layout(self, now: datetime) -> None:
+        """Turn switch tables into hub parents and device placements, and remember them."""
+        hub_macs = self._hub_macs()
+        gateway_mac = hub_macs.get(ROOT_HUB_ID)
+        device_macs = {k: r["mac"] for k, r in self._seen.items() if r.get("mac") and not k.startswith("hub:")}
+        leaf = {h["id"] for h in self.opts[CONF_HUBS] if h.get("type") in (HUB_AP, HUB_MESH, HUB_OTHER) and h["id"] not in self._tables}
+        self._topology = infer(self._tables, hub_macs, gateway_mac, device_macs, ROOT_HUB_ID, leaf_hubs=leaf)
+        stamp = now.isoformat()
+        for key, hub_id in self._topology.device_hub.items():
+            self._seen[key]["auto"] = {"hub": hub_id, "source": PLACE_SNMP, "at": stamp}
+
+    def _auto_placement(self, key: str, rec: dict[str, Any], now: datetime) -> tuple[str | None, str]:
+        mac = rec.get("mac")
+        ap = self._controller_ap.get(mac) if mac else None
+        hub = self._hub_for_mac(ap)
+        if hub:
+            rec["auto"] = {"hub": hub, "source": PLACE_CONTROLLER, "at": now.isoformat()}
+            return hub, PLACE_CONTROLLER
+        auto = rec.get("auto")
+        if auto and auto.get("at") and now - datetime.fromisoformat(auto["at"]) < AUTO_PLACEMENT_TTL:
+            return auto.get("hub"), auto.get("source", PLACE_SNMP)
+        return None, PLACE_NONE
+
+    # ----- ping ------------------------------------------------------------------
 
     async def _ping_tracked(self) -> list[tuple[str, str | None]]:
         """Ping hubs and tracked devices. Returns [(key, ip)] that answered."""
@@ -337,6 +594,11 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 out.pop(key, None)
                 continue
             out[key] = (self._seen.get(key) or {}).get("ip") or cfg.get("host")
+        # Hubs are drawn as hubs, never as devices too.
+        for key in list(out):
+            rec = self._seen.get(key) or {}
+            if self._is_hub_address(rec.get("mac"), out[key]):
+                out.pop(key)
         return out
 
     def _discovered_name(self, key: str, rec: dict[str, Any]) -> str:
@@ -345,35 +607,60 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             dev = dr.async_get(self.hass).async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac)})
             if dev and (dev.name_by_user or dev.name):
                 return dev.name_by_user or dev.name
-        return rec.get("hostname") or fallback_name(mac, rec.get("ip"))
+        if rec.get("hostname"):
+            return rec["hostname"]
+        vendor = rec.get("vendor")
+        if vendor and mac:
+            return f"{vendor} {mac[-5:].upper()}"
+        return fallback_name(mac, rec.get("ip"))
 
     def _build(self, now: datetime, alive_keys: set[str]) -> NetOrbitData:
         stale_after = timedelta(hours=self.opts[CONF_STALE_HOURS])
         hub_ids = {h["id"] for h in self.opts[CONF_HUBS]}
         nodes: dict[str, Node] = {}
+        sources: set[str] = set()
 
         for hub in self.opts[CONF_HUBS]:
             key = f"hub:{hub['id']}"
             rec = self._seen.get(key, {})
-            parent = hub.get("parent")
             if hub["id"] == ROOT_HUB_ID:
                 parent = None
-            elif parent not in hub_ids:
+            elif hub.get("parent_locked") and hub.get("parent") in hub_ids:
+                parent = hub["parent"]
+            elif self._topology.hub_parent.get(hub["id"]) in hub_ids:
+                parent = self._topology.hub_parent[hub["id"]]
+            elif hub.get("parent") in hub_ids:
+                parent = hub["parent"]
+            else:
+                parent = ROOT_HUB_ID
+            if parent == hub["id"]:
                 parent = ROOT_HUB_ID
             nodes[key] = Node(
                 key=key, kind="hub", name=hub.get("name") or hub["id"], ip=hub.get("host"),
+                mac=hub.get("mac") or rec.get("mac"),
                 icon=hub.get("icon") or HUB_ICONS.get(hub.get("type", HUB_OTHER), "mdi:lan"),
                 link=parent, status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
-                source="hub", hub_type=hub.get("type", HUB_OTHER),
+                source="hub", hub_type=hub.get("type", HUB_OTHER), hub_source=hub.get("source", "manual"),
+                vendor=(self._seen.get(hub.get("mac") or "") or {}).get("vendor"),
             )
+        if self._tables:
+            sources.add(PLACE_SNMP)
+        if self._controller_ap:
+            sources.add(PLACE_CONTROLLER)
 
         devices = self.opts[CONF_DEVICES]
         for key, ip in self._tracked_targets().items():
             rec = self._seen.get(key, {})
             cfg = devices.get(key, {})
             name = cfg.get("name") or self._discovered_name(key, rec)
-            hub = cfg.get("hub") if cfg.get("hub") in hub_ids else ROOT_HUB_ID
+            if cfg.get("hub") in hub_ids:
+                hub, placement = cfg["hub"], PLACE_MANUAL
+                sources.add(PLACE_MANUAL)
+            else:
+                hub, placement = self._auto_placement(key, rec, now)
+                if hub not in hub_ids:
+                    hub, placement = ROOT_HUB_ID, PLACE_NONE
             nodes[key] = Node(
                 key=key, kind="device", name=name, ip=ip, mac=rec.get("mac") or cfg.get("mac"),
                 icon=cfg.get("icon") or guess_icon(f"{name} {rec.get('hostname') or ''}"),
@@ -381,6 +668,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
                 hostname=rec.get("hostname"), source="manual" if key in devices else "discovered",
+                vendor=rec.get("vendor"), placement=placement,
             )
 
         new_devices = []
@@ -391,15 +679,20 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     continue
                 if self.opts[CONF_IGNORE_RANDOM_MAC] and is_random_mac(rec.get("mac")):
                     continue
+                if self._is_hub_address(rec.get("mac"), rec.get("ip")):
+                    continue
                 new_devices.append({
                     "key": key, "mac": rec.get("mac"), "ip": rec.get("ip"),
                     "name": self._discovered_name(key, rec), "first_seen": rec.get("first_seen"),
-                    "last_seen": rec.get("last_seen"),
+                    "last_seen": rec.get("last_seen"), "vendor": rec.get("vendor"),
                 })
             new_devices.sort(key=lambda d: d.get("first_seen") or "", reverse=True)
 
+        hub_mac_set = set(self._hub_macs().values())
+        suggestions = [s for s in self._suggestions if s["key"] not in hub_mac_set and s["key"] not in self.opts[CONF_DISMISSED_HUBS]]
+
         return NetOrbitData(
-            nodes=nodes, new_devices=new_devices,
+            nodes=nodes, new_devices=new_devices, suggested_hubs=suggestions, sources=sorted(sources),
             last_scan=self._last_sweep.isoformat() if self._last_sweep else None,
         )
 
@@ -426,10 +719,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     self.hass.bus.async_fire(EVENT_DEVICE_RECOVERED, payload)
             self._prev_status[key] = node.status
 
-    # ----- helpers used by config flow and services --------------------------
+    # ----- lookups used by services, the options flow and AI tools ------------
 
     def known_device(self, key: str) -> dict[str, Any] | None:
-        """Raw record for a device the scanner has seen."""
         return self._seen.get(key)
 
     def find_key(self, mac: str | None = None, ip: str | None = None) -> str | None:
@@ -442,6 +734,80 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 if rec.get("ip") == ip and not key.startswith("hub:"):
                     return key
         return mac
+
+    def resolve_device(self, ref: str) -> str | None:
+        """Find a device from a MAC, IP, key or name (exact name first, then a unique partial match)."""
+        if not ref:
+            return None
+        ref = str(ref).strip()
+        key = self.find_key(mac=ref) if normalize_mac(ref) else None
+        if key and key in self._seen:
+            return key
+        key = self.find_key(ip=ref)
+        if key and key in self._seen:
+            return key
+        if ref in self._seen:
+            return ref
+        nodes = self.data.nodes if self.data else {}
+        low = ref.lower()
+        exact = [k for k, n in nodes.items() if n.kind == "device" and n.name.lower() == low]
+        if len(exact) == 1:
+            return exact[0]
+        names = {k: self._discovered_name(k, r).lower() for k, r in self._seen.items() if not k.startswith("hub:")}
+        exact = [k for k, n in names.items() if n == low]
+        if len(exact) == 1:
+            return exact[0]
+        partial = [k for k, n in nodes.items() if n.kind == "device" and low in n.name.lower()]
+        return partial[0] if len(partial) == 1 else None
+
+    def resolve_hub(self, ref: str) -> str | None:
+        """Find a hub from its id, name, IP or MAC."""
+        if not ref:
+            return None
+        ref = str(ref).strip().removeprefix("hub:")
+        low = ref.lower()
+        mac = normalize_mac(ref)
+        for hub in self.opts[CONF_HUBS]:
+            if hub["id"] == ref or (hub.get("name") or "").lower() == low or hub.get("host") == ref:
+                return hub["id"]
+            if mac and macs_close(hub.get("mac") or (self._seen.get(f"hub:{hub['id']}") or {}).get("mac"), mac):
+                return hub["id"]
+        partial = [h["id"] for h in self.opts[CONF_HUBS] if low in (h.get("name") or "").lower()]
+        return partial[0] if len(partial) == 1 else None
+
+    def match_addresses(self, macs: list[str], ips: list[str]) -> tuple[list[str], list[str]]:
+        """Map pasted MACs/IPs to known device keys. Returns (matched keys, unmatched addresses)."""
+        matched: list[str] = []
+        unmatched: list[str] = []
+        for mac in macs:
+            key = mac if mac in self._seen else None
+            if key is None:
+                # A radio MAC in the list might be one byte off the device's real MAC.
+                for k, rec in self._seen.items():
+                    if not k.startswith("hub:") and macs_close(rec.get("mac"), mac, spread=0):
+                        key = k
+                        break
+            if key and key not in matched and not self._is_hub_address(key, None):
+                matched.append(key)
+            elif key is None:
+                unmatched.append(mac.upper())
+        for ip in ips:
+            key = self.find_key(ip=ip)
+            if key and key in self._seen and key not in matched and not self._is_hub_address(None, ip):
+                matched.append(key)
+            elif not key:
+                unmatched.append(ip)
+        return matched, unmatched
+
+    def seed_device(self, mac: str | None, ip: str | None) -> str:
+        """Remember a device given by hand (for example from a pasted list) even if no sweep found it yet."""
+        key = normalize_mac(mac) or f"ip:{ip}"
+        rec = self._seen.setdefault(key, {"first_seen": dt_util.utcnow().isoformat(), "discovered": bool(normalize_mac(mac))})
+        if normalize_mac(mac):
+            rec["mac"] = normalize_mac(mac)
+        if ip:
+            rec["ip"] = ip
+        return key
 
 
 def _read_arp() -> dict[str, str]:

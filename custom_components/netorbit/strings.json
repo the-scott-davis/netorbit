@@ -33,12 +33,14 @@
       "init": {
         "title": "NetOrbit",
         "menu_options": {
-          "settings": "Settings",
+          "review_hubs": "Review suggested hubs",
+          "paste_list": "Paste a client list from an access point or app",
           "add_hub": "Add a hub (switch, access point, mesh node)",
           "edit_hub": "Edit or remove a hub",
           "add_device": "Track a device",
-          "edit_device": "Edit or stop tracking a device",
-          "review_new": "Review new devices"
+          "edit_device": "Edit, move or stop tracking a device",
+          "review_new": "Review new devices",
+          "settings": "Settings"
         }
       },
       "settings": {
@@ -48,12 +50,20 @@
           "ping_interval": "Ping interval",
           "discovery_interval": "Discovery scan interval",
           "stale_hours": "Mark as not seen after",
-          "ignore_random_mac": "Ignore randomized (private) MAC addresses"
+          "ignore_random_mac": "Ignore randomized (private) MAC addresses",
+          "auto_hubs": "Add hubs automatically when NetOrbit is sure",
+          "group_by_type": "Group devices by type when the layout is unknown",
+          "snmp_enabled": "Read MAC tables from managed switches (SNMP)",
+          "snmp_community": "SNMP community (password)"
         },
         "data_description": {
           "discovery_interval": "How often the whole subnet is swept for new devices.",
           "stale_hours": "A device that has not answered for this long turns red and fires a netorbit_device_stale event.",
-          "ignore_random_mac": "Phones and laptops often use a private address per network. Leave this on to keep them off the map."
+          "ignore_random_mac": "Phones and laptops often use a private address per network. Leave this on to keep them off the map.",
+          "auto_hubs": "When off, everything NetOrbit finds is listed under Review suggested hubs instead.",
+          "group_by_type": "On networks where nothing reports which access point a device uses, the card groups devices into TVs, computers, smart home and so on.",
+          "snmp_enabled": "NetOrbit asks each device once an hour whether it is a managed switch, using read-only SNMP, then reads the switch's MAC table to place devices automatically.",
+          "snmp_community": "Leave empty to try the factory default. If you changed your switches' read-only community, enter it here."
         }
       },
       "add_hub": {
@@ -71,7 +81,9 @@
       },
       "edit_hub": {
         "title": "Edit a hub",
-        "data": { "hub": "Hub" }
+        "data": {
+          "hub": "Hub"
+        }
       },
       "edit_hub_details": {
         "title": "Edit {hub}",
@@ -91,13 +103,15 @@
           "host": "IP address",
           "name": "Name (optional)",
           "icon": "Icon (optional)",
-          "hub": "Connected through",
+          "hub": "Connected through (Automatic lets NetOrbit decide)",
           "sleepy": "Allowed to sleep (never fires a stale event)"
         }
       },
       "edit_device": {
         "title": "Edit a device",
-        "data": { "device": "Device" }
+        "data": {
+          "device": "Device"
+        }
       },
       "edit_device_details": {
         "title": "Edit {device}",
@@ -105,7 +119,7 @@
         "data": {
           "name": "Name (empty uses the discovered name)",
           "icon": "Icon (empty picks one automatically)",
-          "hub": "Connected through",
+          "hub": "Connected through (Automatic lets NetOrbit decide)",
           "sleepy": "Allowed to sleep (never fires a stale event)",
           "stop_tracking": "Stop tracking and ignore this device"
         }
@@ -117,16 +131,37 @@
           "track": "Start tracking",
           "ignore": "Ignore"
         }
+      },
+      "review_hubs": {
+        "title": "Suggested hubs",
+        "description": "NetOrbit thinks these might be routers, switches, access points or mesh nodes.",
+        "data": {
+          "confirm": "These are hubs",
+          "dismiss": "Not hubs (stop suggesting)"
+        }
+      },
+      "paste_list": {
+        "title": "Paste a client list",
+        "description": "Open the client or device list for one access point, mesh node or switch (its web page or phone app), copy everything, and paste it here. NetOrbit picks out the MAC and IP addresses and places those devices under the hub you choose.",
+        "data": {
+          "hub": "Hub these devices connect through",
+          "text": "Pasted list"
+        }
       }
     },
     "error": {
       "invalid_ip": "That is not a valid IP address.",
       "hub_cycle": "A hub cannot be connected through itself.",
-      "pick_or_ip": "Pick a device or enter a valid IP address."
+      "pick_or_ip": "Pick a device or enter a valid IP address.",
+      "hub_exists": "Another hub already uses that address.",
+      "no_addresses": "No MAC or IP addresses were found in that text.",
+      "no_matches": "None of those addresses match a device on this network.",
+      "not_loaded": "NetOrbit is not running right now. Try again in a minute."
     },
     "abort": {
       "no_devices": "No devices are being tracked yet.",
-      "no_new_devices": "There are no new devices right now."
+      "no_new_devices": "There are no new devices right now.",
+      "no_suggestions": "There are no suggested hubs right now."
     }
   },
   "selector": {
@@ -165,29 +200,230 @@
       "name": "Track device",
       "description": "Start tracking a device by MAC or IP address.",
       "fields": {
-        "mac": { "name": "MAC address", "description": "MAC address of the device." },
-        "ip": { "name": "IP address", "description": "IP address, used when the MAC is unknown." },
-        "name": { "name": "Name", "description": "Name to show on the map." },
-        "icon": { "name": "Icon", "description": "Icon to show on the map." },
-        "hub": { "name": "Hub", "description": "Hub id the device connects through." },
-        "sleepy": { "name": "Allowed to sleep", "description": "Never fire a stale event for this device." },
-        "config_entry_id": { "name": "Config entry", "description": "Only needed if you have more than one NetOrbit entry." }
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device."
+        },
+        "ip": {
+          "name": "IP address",
+          "description": "IP address, used when the MAC is unknown."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name to show on the map."
+        },
+        "icon": {
+          "name": "Icon",
+          "description": "Icon to show on the map."
+        },
+        "hub": {
+          "name": "Hub",
+          "description": "Hub id the device connects through."
+        },
+        "sleepy": {
+          "name": "Allowed to sleep",
+          "description": "Never fire a stale event for this device."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
       }
     },
     "ignore_device": {
       "name": "Ignore device",
       "description": "Stop tracking a device and hide it from new device lists.",
       "fields": {
-        "mac": { "name": "MAC address", "description": "MAC address of the device." },
-        "ip": { "name": "IP address", "description": "IP address of the device." },
-        "config_entry_id": { "name": "Config entry", "description": "Only needed if you have more than one NetOrbit entry." }
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device."
+        },
+        "ip": {
+          "name": "IP address",
+          "description": "IP address of the device."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        },
+        "device": {
+          "name": "Device",
+          "description": "Name, IP or MAC address."
+        }
       }
     },
     "scan_now": {
       "name": "Scan now",
       "description": "Sweep the subnet for new devices right away.",
       "fields": {
-        "config_entry_id": { "name": "Config entry", "description": "Only needed if you have more than one NetOrbit entry." }
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "assign_device": {
+      "name": "Place device under a hub",
+      "description": "Pin one or more devices to a hub. Manual placement beats automatic placement.",
+      "fields": {
+        "device": {
+          "name": "Devices",
+          "description": "One or more names, IPs or MAC addresses."
+        },
+        "hub": {
+          "name": "Hub",
+          "description": "Hub name or id."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "reset_placement": {
+      "name": "Reset placement",
+      "description": "Let NetOrbit place these devices automatically again.",
+      "fields": {
+        "device": {
+          "name": "Devices",
+          "description": "One or more names, IPs or MAC addresses."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "add_hub": {
+      "name": "Add hub",
+      "description": "Add a router, switch, access point or mesh node to the map.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name shown on the map."
+        },
+        "type": {
+          "name": "Type",
+          "description": "router, switch, access_point, mesh_node or other."
+        },
+        "parent": {
+          "name": "Connected to",
+          "description": "Hub this one connects to. Defaults to the router."
+        },
+        "ip": {
+          "name": "IP address",
+          "description": "Optional."
+        },
+        "mac": {
+          "name": "MAC address",
+          "description": "Optional."
+        },
+        "device": {
+          "name": "From device",
+          "description": "Turn an existing device into a hub."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "remove_hub": {
+      "name": "Remove hub",
+      "description": "Remove a hub. Its devices move to the hub it connected to.",
+      "fields": {
+        "hub": {
+          "name": "Hub",
+          "description": "Hub name or id."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "import_client_list": {
+      "name": "Import client list",
+      "description": "Place every device whose MAC or IP appears in the text under one hub.",
+      "fields": {
+        "hub": {
+          "name": "Hub",
+          "description": "Hub name or id."
+        },
+        "text": {
+          "name": "Text",
+          "description": "Anything copied from an access point, app or switch."
+        },
+        "add_missing": {
+          "name": "Add unknown devices",
+          "description": "Track MAC addresses NetOrbit has not seen yet."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "confirm_hub": {
+      "name": "Confirm hub",
+      "description": "Mark a device (usually a suggested one) as a hub.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Name, IP or MAC address."
+        },
+        "type": {
+          "name": "Type",
+          "description": "router, switch, access_point, mesh_node or other."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Optional new name."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "dismiss_hub": {
+      "name": "Dismiss hub suggestion",
+      "description": "Stop suggesting this device as a hub.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Name, IP or MAC address."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "update_hub": {
+      "name": "Update hub",
+      "description": "Rename a hub, change its type or what it connects to.",
+      "fields": {
+        "hub": {
+          "name": "Hub",
+          "description": "Hub name or id."
+        },
+        "name": {
+          "name": "Name",
+          "description": "New name."
+        },
+        "type": {
+          "name": "Type",
+          "description": "router, switch, access_point, mesh_node or other."
+        },
+        "parent": {
+          "name": "Connected to",
+          "description": "Hub it connects to."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
       }
     }
   }

@@ -29,6 +29,9 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements_test.txt
+      - name: Install the conversation packages Home Assistant pins (used by the AI tool tests)
+        run: |
+          pip install $(python -c "import json, pathlib, homeassistant.components.conversation as c; print(' '.join(json.loads((pathlib.Path(c.__file__).parent / 'manifest.json').read_text())['requirements']))")
       - run: pytest -q
       - uses: actions/setup-node@v4
         with:

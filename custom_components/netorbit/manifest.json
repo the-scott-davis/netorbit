@@ -10,17 +10,21 @@
     "network"
   ],
   "after_dependencies": [
-    "frontend"
+    "frontend",
+    "ssdp"
   ],
   "documentation": "https://github.com/the-scott-davis/netorbit",
   "integration_type": "service",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/the-scott-davis/netorbit/issues",
   "loggers": [
-    "icmplib"
+    "icmplib",
+    "pysnmp"
   ],
   "requirements": [
-    "icmplib>=3.0.3"
+    "icmplib>=3.0.3",
+    "pysnmp>=7.1",
+    "aiooui>=0.1.9"
   ],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

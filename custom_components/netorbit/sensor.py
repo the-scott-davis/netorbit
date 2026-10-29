@@ -112,6 +112,9 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
             "first_seen": node.first_seen,
             "hostname": node.hostname,
             "source": node.source,
+            "vendor": node.vendor,
+            "placement": node.placement if node.kind == "device" else None,
+            "hub_source": node.hub_source,
         }
 
     @callback
@@ -162,6 +165,9 @@ class NetOrbitSummarySensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity
                 {**d, "mac": d["mac"].upper() if d.get("mac") else None}
                 for d in (data.new_devices if data else [])
             ],
+            "suggested_hubs": data.suggested_hubs if data else [],
+            "sources": data.sources if data else [],
+            "group_by_type": opts.get("group_by_type", True),
             "last_scan": data.last_scan if data else None,
             "config_entry_id": self.coordinator.config_entry.entry_id,
         }

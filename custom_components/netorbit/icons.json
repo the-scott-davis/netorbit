@@ -1,7 +1,37 @@
 {
   "services": {
-    "track_device": { "service": "mdi:map-marker-plus" },
-    "ignore_device": { "service": "mdi:eye-off" },
-    "scan_now": { "service": "mdi:radar" }
+    "track_device": {
+      "service": "mdi:map-marker-plus"
+    },
+    "ignore_device": {
+      "service": "mdi:eye-off"
+    },
+    "scan_now": {
+      "service": "mdi:radar"
+    },
+    "assign_device": {
+      "service": "mdi:arrow-decision"
+    },
+    "reset_placement": {
+      "service": "mdi:restore"
+    },
+    "add_hub": {
+      "service": "mdi:access-point-plus"
+    },
+    "remove_hub": {
+      "service": "mdi:access-point-remove"
+    },
+    "import_client_list": {
+      "service": "mdi:clipboard-list"
+    },
+    "confirm_hub": {
+      "service": "mdi:check-network"
+    },
+    "dismiss_hub": {
+      "service": "mdi:close-network"
+    },
+    "update_hub": {
+      "service": "mdi:pencil"
+    }
   }
 }

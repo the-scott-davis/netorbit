@@ -15,20 +15,22 @@
         hub_type: type, ip: "192.0.2." + (key === "gateway" ? 1 : ip++), icon: { router: "mdi:router-network", switch: "mdi:switch", access_point: "mdi:access-point", mesh_node: "mdi:access-point-network" }[type],
         last_seen: ago(0), sleepy: false } };
     };
-    const dev = (label, icon, parent, status = "online", sleepy = false) => {
+    const dev = (label, icon, parent, status = "online", sleepy = false, placement) => {
       const m = mac();
       const id = "sensor.netorbit_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
       states[id] = { entity_id: id, state: status, attributes: {
         netorbit: true, kind: "device", label, node_key: m.toLowerCase(), link: "hub:" + parent, ip: "192.0.2." + ip++, mac: m,
-        icon, sleepy, last_seen: status === "online" ? ago(0) : status === "recent" ? ago(5) : ago(40), source: "discovered" } };
+        icon, sleepy, last_seen: status === "online" ? ago(0) : status === "recent" ? ago(5) : ago(40), source: "discovered",
+        placement: placement || (parent === "gateway" ? "none" : "snmp") } };
     };
     def(hub, dev);
     return states;
   }
 
-  function summary(states, fresh) {
+  function summary(states, fresh, suggested = []) {
     states["sensor.netorbit_devices_online"] = { entity_id: "sensor.netorbit_devices_online", state: "0", attributes: {
-      netorbit: true, kind: "summary", stale_hours: 24, mode: "manual", config_entry_id: "preview",
+      netorbit: true, kind: "summary", stale_hours: 24, mode: "manual", config_entry_id: "preview", group_by_type: true,
+      suggested_hubs: suggested.map(([name, type, reasons]) => { const m = mac(); return { key: m.toLowerCase(), mac: m, ip: "192.0.2." + (220 + n), name, type, reasons }; }),
       new_devices: fresh.map((name, i) => ({ key: "new" + i, name, mac: mac(), ip: "192.0.2." + (200 + i), first_seen: ago(1), last_seen: ago(0) })) } };
     return states;
   }
@@ -50,7 +52,7 @@
       ["Garage Door 1:mdi:garage", "Garage Door 2:mdi:garage", "Shop Lights:mdi:lightbulb-group", "Freezer Sensor:mdi:fridge", "Sprinklers:mdi:sprinkler"]
         .forEach((s) => { const [l, ...ic] = s.split(":"); dev(l, ic.join(":"), "garage"); });
       dev("Weather Station", "mdi:weather-partly-cloudy", "gateway");
-    }), ["Device 3A:91", "esp-7c2d1a"]),
+    }), ["Device 3A:91"], [["esp-7c2d1a", "access_point", ["its name looks like an access point"]]]),
 
     mesh: summary(build((hub, dev) => {
       hub("gateway", "Mesh Router", "router", null);
@@ -66,5 +68,17 @@
       ["living-room-tv:mdi:television", "kitchen-speaker:mdi:speaker", "office-printer:mdi:printer", "Device 4B:12:mdi:lan-connect", "homeassistant:mdi:home-assistant", "shelly-plug-3:mdi:chip", "esp-garage:mdi:chip", "nas:mdi:server", "work-laptop:mdi:laptop", "Device 77:E0:mdi:lan-connect"]
         .forEach((s, i) => { const parts = s.split(":"); const ic = parts.slice(-2).join(":"); const l = parts.slice(0, -2).join(":"); dev(l, ic, "gateway", i === 9 ? "stale" : "online"); });
     }), ["Device 9C:04"]),
+
+    // A typical mesh home where nothing reports which node a device uses.
+    novice: summary(build((hub, dev) => {
+      hub("gateway", "Router", "router", null);
+      hub("m1", "Mesh Node 2", "mesh_node", "gateway");
+      ["Family Room TV:mdi:television", "Bedroom TV:mdi:television", "Streamer:mdi:television-play", "Kitchen Speaker:mdi:speaker", "Game Console:mdi:gamepad-variant",
+       "Laptop:mdi:laptop", "Desktop:mdi:monitor", "Tablet:mdi:tablet", "Printer:mdi:printer",
+       "Doorbell:mdi:doorbell-video", "Front Cam:mdi:cctv", "Back Cam:mdi:cctv",
+       "Thermostat:mdi:thermostat", "Smart Plug:mdi:power-socket-us", "Robot Vac:mdi:robot-vacuum", "Garage Door:mdi:garage", "Lamp:mdi:lightbulb", "Air Purifier:mdi:air-purifier",
+       "Device 4B:12:mdi:lan-connect"]
+        .forEach((s, i) => { const parts = s.split(":"); const ic = parts.slice(-2).join(":"); const l = parts.slice(0, -2).join(":"); dev(l, ic, "gateway", i === 4 ? "recent" : "online", i === 4); });
+    }), [], [["Mesh Node 3", "mesh_node", ["made by eero"]]]),
   };
 })();

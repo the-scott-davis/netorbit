@@ -1,2 +1,4 @@
 pytest-homeassistant-custom-component
 icmplib>=3.0.3
+pysnmp>=7.1
+aiooui>=0.1.9

@@ -28,13 +28,16 @@
 <body>
 <div id="c"></div>
 <script type="module">
-  try { Object.assign(window.MDI, await import("https://cdn.jsdelivr.net/npm/@mdi/js@7.4.47/mdi.js")); } catch (e) {}
-  try { Object.assign(window.MDI, await import("/scripts/preview/mdi.js")); } catch (e) {}
+  // Icons: a local copy (scripts/preview/mdi.js, from the @mdi/js npm package) if present, otherwise the CDN.
+  try { Object.assign(window.MDI, await import("/scripts/preview/mdi.js")); }
+  catch (e) { try { Object.assign(window.MDI, await import("https://cdn.jsdelivr.net/npm/@mdi/js@7.4.47/mdi.js")); } catch (e2) {} }
   const s = new URLSearchParams(location.search).get("s") || "full";
   const card = document.createElement("netorbit-card");
   card.setConfig({ title: "Home Network" });
   document.getElementById("c").appendChild(card);
-  card.hass = { states: window.NETORBIT_SCENARIOS[s], entities: {}, user: { is_admin: true }, callService: async () => {} };
+  window.calls = [];
+  card.hass = { states: window.NETORBIT_SCENARIOS[s], entities: {}, user: { is_admin: true },
+    callService: async (d, svc, data) => { window.calls.push([d, svc, data]); } };
   window.ready = true;
 </script>
 </body>

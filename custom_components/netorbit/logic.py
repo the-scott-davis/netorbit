@@ -137,6 +137,24 @@ def validate_subnet(subnet: str, max_hosts: int) -> str:
     return str(net)
 
 
+_ANY_MAC_RE = re.compile(r"(?<![0-9A-Fa-f])([0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4})(?![0-9A-Fa-f])")
+_ANY_IP_RE = re.compile(r"(?<![\d.])((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3})(?![\d.])")
+
+
+def extract_addresses(text: str) -> tuple[list[str], list[str]]:
+    """Pull every MAC and IPv4 address out of pasted text (a table, CSV, app screen dump)."""
+    macs: list[str] = []
+    for raw in _ANY_MAC_RE.findall(text or ""):
+        mac = normalize_mac(raw)
+        if mac and mac not in macs:
+            macs.append(mac)
+    ips: list[str] = []
+    for ip in _ANY_IP_RE.findall(text or ""):
+        if ip not in ips and not ip.endswith(".255") and ip != "0.0.0.0":
+            ips.append(ip)
+    return macs, ips
+
+
 def slugify_id(text: str) -> str:
     """Simple id slug: lowercase letters, digits and underscores."""
     s = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")

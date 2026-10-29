@@ -230,9 +230,11 @@ async def test_diagnostics_redacts(hass: HomeAssistant, fake_net) -> None:
 
     fake_net.alive = {GATEWAY, "192.0.2.11"}
     fake_net.arp = {"192.0.2.11": MAC_B}
-    entry = _entry("auto")
+    entry = _entry("auto", snmp_community="hunter2secret", dismissed_hubs=["00:00:5e:00:53:99"])
     await _setup(hass, entry)
     diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert "hunter2secret" not in repr(diag)
+    assert "53:99" not in repr(diag)
     text = repr(diag)
     assert "192.0.2" not in text
     assert MAC_B not in text.lower()

@@ -7,7 +7,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import NetOrbitConfigEntry
-from .const import CONF_DEVICES, CONF_HUBS, CONF_IGNORED
+from .const import CONF_DEVICES, CONF_DISMISSED_HUBS, CONF_HUBS, CONF_IGNORED, CONF_SNMP_COMMUNITY
 
 
 def _mask(i: int, prefix: str) -> str:
@@ -34,11 +34,18 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
                     "has_hostname": bool(node.hostname),
                     "sleepy": node.sleepy,
                     "source": node.source,
+                    "placement": node.placement,
                     "hub_type": node.hub_type,
                 }
             )
     return {
-        "settings": {k: v for k, v in opts.items() if k not in (CONF_HUBS, CONF_DEVICES, CONF_IGNORED)},
+        "settings": {
+            **{k: v for k, v in opts.items() if k not in (CONF_HUBS, CONF_DEVICES, CONF_IGNORED, CONF_DISMISSED_HUBS, CONF_SNMP_COMMUNITY)},
+            "snmp_community_set": bool(opts.get(CONF_SNMP_COMMUNITY)),
+            "dismissed_hubs": len(opts.get(CONF_DISMISSED_HUBS, [])),
+        },
+        "automatic_sources": data.sources if data else [],
+        "suggested_hubs": len(data.suggested_hubs) if data else 0,
         "subnet_prefix": entry.data.get("subnet", "").split("/")[-1],
         "hubs": [
             {"id": hub_alias[h["id"]], "type": h.get("type"), "parent": hub_alias.get(h.get("parent") or "", None), "has_host": bool(h.get("host"))}

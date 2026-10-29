@@ -12,14 +12,18 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector as sel
 
 from .const import (
+    CONF_AUTO_HUBS,
     CONF_DEVICES,
     CONF_DISCOVERY_INTERVAL,
     CONF_GATEWAY,
+    CONF_GROUP_BY_TYPE,
     CONF_HUBS,
     CONF_IGNORE_RANDOM_MAC,
     CONF_IGNORED,
     CONF_MODE,
     CONF_PING_INTERVAL,
+    CONF_SNMP_COMMUNITY,
+    CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
     CONF_SUBNET,
     DEFAULT_DISCOVERY_INTERVAL,
@@ -35,10 +39,12 @@ from .const import (
     MODES,
     ROOT_HUB_ID,
 )
+from . import manage
 from .coordinator import options_with_defaults
-from .logic import slugify_id, validate_subnet
+from .logic import extract_addresses, normalize_mac, validate_subnet
 
 NONE_VALUE = "__none__"
+AUTO_VALUE = "__auto__"
 
 
 async def _default_subnet(hass) -> tuple[str, str]:
@@ -137,10 +143,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
     @property
     def opts(self) -> dict[str, Any]:
         if self._opts is None:
-            self._opts = options_with_defaults(self.config_entry)
-            self._opts[CONF_HUBS] = [dict(h) for h in self._opts[CONF_HUBS]]
-            self._opts[CONF_DEVICES] = {k: dict(v) for k, v in self._opts[CONF_DEVICES].items()}
-            self._opts[CONF_IGNORED] = list(self._opts[CONF_IGNORED])
+            self._opts = manage.copy_options(options_with_defaults(self.config_entry))
         return self._opts
 
     def _coordinator(self):
@@ -182,9 +185,14 @@ class NetOrbitOptionsFlow(OptionsFlow):
     # ----- menu ------------------------------------------------------------------
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        menu = ["settings", "add_hub", "edit_hub", "add_device", "edit_device"]
+        menu = []
+        coord = self._coordinator()
+        if coord and coord.data and coord.data.suggested_hubs:
+            menu.append("review_hubs")
+        menu += ["paste_list", "add_hub", "edit_hub", "add_device", "edit_device"]
         if self._untracked_choices():
             menu.append("review_new")
+        menu.append("settings")
         return self.async_show_menu(step_id="init", menu_options=menu)
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -196,6 +204,10 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     CONF_DISCOVERY_INTERVAL: int(user_input[CONF_DISCOVERY_INTERVAL]),
                     CONF_STALE_HOURS: int(user_input[CONF_STALE_HOURS]),
                     CONF_IGNORE_RANDOM_MAC: user_input[CONF_IGNORE_RANDOM_MAC],
+                    CONF_AUTO_HUBS: user_input[CONF_AUTO_HUBS],
+                    CONF_GROUP_BY_TYPE: user_input[CONF_GROUP_BY_TYPE],
+                    CONF_SNMP_ENABLED: user_input[CONF_SNMP_ENABLED],
+                    CONF_SNMP_COMMUNITY: (user_input.get(CONF_SNMP_COMMUNITY) or "").strip(),
                 }
             )
             return self._save()
@@ -207,6 +219,12 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Required(CONF_DISCOVERY_INTERVAL, default=o[CONF_DISCOVERY_INTERVAL]): _int_box(60, 86400, "s"),
                 vol.Required(CONF_STALE_HOURS, default=o[CONF_STALE_HOURS]): _int_box(1, 720, "h"),
                 vol.Required(CONF_IGNORE_RANDOM_MAC, default=o[CONF_IGNORE_RANDOM_MAC]): bool,
+                vol.Required(CONF_AUTO_HUBS, default=o[CONF_AUTO_HUBS]): bool,
+                vol.Required(CONF_GROUP_BY_TYPE, default=o[CONF_GROUP_BY_TYPE]): bool,
+                vol.Required(CONF_SNMP_ENABLED, default=o[CONF_SNMP_ENABLED]): bool,
+                vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
+                    sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)
+                ),
             }
         )
         return self.async_show_form(step_id="settings", data_schema=schema)
@@ -230,15 +248,12 @@ class NetOrbitOptionsFlow(OptionsFlow):
             if host and not _valid_ip(host):
                 errors["host"] = "invalid_ip"
             else:
-                base = slugify_id(user_input["name"])
-                ids = {h["id"] for h in self.opts[CONF_HUBS]}
-                hub_id, n = base, 2
-                while hub_id in ids:
-                    hub_id, n = f"{base}_{n}", n + 1
-                self.opts[CONF_HUBS].append(
-                    {"id": hub_id, "name": user_input["name"], "host": host, "type": user_input["type"], "parent": user_input["parent"]}
-                )
-                return self._save()
+                try:
+                    manage.add_hub(self.opts, user_input["name"], user_input["type"], user_input["parent"], host, None, source="manual")
+                except manage.ManageError:
+                    errors["host"] = "hub_exists"
+                else:
+                    return self._save()
         return self.async_show_form(step_id="add_hub", data_schema=self._hub_schema({}, None, False), errors=errors)
 
     async def async_step_edit_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -255,23 +270,18 @@ class NetOrbitOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             if user_input.get("remove") and not root:
-                self.opts[CONF_HUBS] = [h for h in self.opts[CONF_HUBS] if h["id"] != hub["id"]]
-                for h in self.opts[CONF_HUBS]:
-                    if h.get("parent") == hub["id"]:
-                        h["parent"] = hub.get("parent") or ROOT_HUB_ID
-                for cfg in self.opts[CONF_DEVICES].values():
-                    if cfg.get("hub") == hub["id"]:
-                        cfg["hub"] = hub.get("parent") or ROOT_HUB_ID
+                manage.remove_hub(self.opts, hub["id"])
                 return self._save()
             host = (user_input.get("host") or "").strip() or None
             if host and not _valid_ip(host):
                 errors["host"] = "invalid_ip"
-            elif not root and _creates_cycle(self.opts[CONF_HUBS], hub["id"], user_input["parent"]):
+            elif not root and manage.creates_cycle(self.opts[CONF_HUBS], hub["id"], user_input["parent"]):
                 errors["parent"] = "hub_cycle"
             else:
-                hub.update({"name": user_input["name"], "host": host, "type": user_input["type"]})
-                if not root:
-                    hub["parent"] = user_input["parent"]
+                fields = {"name": user_input["name"], "host": host, "type": user_input["type"]}
+                if not root and user_input["parent"] != hub.get("parent"):
+                    fields["parent"] = user_input["parent"]
+                manage.update_hub(self.opts, hub["id"], **fields)
                 return self._save()
         schema = self._hub_schema(hub, hub["id"], root)
         if not root:
@@ -287,7 +297,9 @@ class NetOrbitOptionsFlow(OptionsFlow):
         return {
             vol.Optional("name", description={"suggested_value": cfg.get("name")}): str,
             vol.Optional("icon", description={"suggested_value": cfg.get("icon")}): sel.IconSelector(),
-            vol.Required("hub", default=cfg.get("hub") or ROOT_HUB_ID): _select(self._hub_choices()),
+            vol.Required("hub", default=cfg.get("hub") or AUTO_VALUE): _select(
+                [{"value": AUTO_VALUE, "label": "Automatic"}, *self._hub_choices()]
+            ),
             vol.Required("sleepy", default=bool(cfg.get("sleepy", False))): bool,
         }
 
@@ -350,10 +362,10 @@ class NetOrbitOptionsFlow(OptionsFlow):
             for field in ("name", "icon"):
                 if not user_input.get(field):
                     new_cfg.pop(field, None)
+            if user_input.get("hub") in (None, AUTO_VALUE):
+                manage.reset_placement(self.opts, [key])
             new_cfg["tracked"] = True
             return self._save()
-        if node:
-            cfg.setdefault("hub", node.link or ROOT_HUB_ID)
         schema = vol.Schema({**self._device_fields(cfg), vol.Optional("stop_tracking", default=False): bool})
         return self.async_show_form(
             step_id="edit_device_details", data_schema=schema,
@@ -379,9 +391,68 @@ class NetOrbitOptionsFlow(OptionsFlow):
         )
         return self.async_show_form(step_id="review_new", data_schema=schema)
 
+    async def async_step_review_hubs(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        coord = self._coordinator()
+        suggestions = coord.data.suggested_hubs if coord and coord.data else []
+        if not suggestions:
+            return self.async_abort(reason="no_suggestions")
+        choices = [
+            {"value": s["key"], "label": f"{s['name']} ({s.get('ip') or 'no IP'}): {', '.join(s.get('reasons') or [])}"}
+            for s in suggestions
+        ]
+        if user_input is not None:
+            confirm = user_input.get("confirm", [])
+            for s in suggestions:
+                if s["key"] in confirm:
+                    try:
+                        manage.add_hub(self.opts, s["name"], s.get("type") or "access_point", None, s.get("ip"), s["key"], source="manual")
+                    except manage.ManageError:
+                        continue
+                    self.opts[CONF_DEVICES].pop(s["key"], None)
+                elif s["key"] in user_input.get("dismiss", []):
+                    manage.dismiss_hub(self.opts, s["key"])
+            return self._save()
+        schema = vol.Schema(
+            {
+                vol.Optional("confirm", default=[]): _select(choices, multiple=True),
+                vol.Optional("dismiss", default=[]): _select(choices, multiple=True),
+            }
+        )
+        return self.async_show_form(step_id="review_hubs", data_schema=schema)
+
+    async def async_step_paste_list(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        placeholders = {"result": ""}
+        if user_input is not None:
+            macs, ips = extract_addresses(user_input.get("text", ""))
+            coord = self._coordinator()
+            if not macs and not ips:
+                errors["text"] = "no_addresses"
+            elif coord is None:
+                errors["base"] = "not_loaded"
+            else:
+                keys, unmatched = coord.match_addresses(macs, ips)
+                for addr in list(unmatched):
+                    if normalize_mac(addr):
+                        keys.append(coord.seed_device(addr, None))
+                if not keys:
+                    errors["text"] = "no_matches"
+                else:
+                    manage.assign(self.opts, keys, user_input["hub"])
+                    return self._save()
+        schema = vol.Schema(
+            {
+                vol.Required("hub"): _select(self._hub_choices()),
+                vol.Required("text"): sel.TextSelector(sel.TextSelectorConfig(multiline=True)),
+            }
+        )
+        return self.async_show_form(step_id="paste_list", data_schema=schema, errors=errors, description_placeholders=placeholders)
+
 
 def _clean_device(user_input: dict[str, Any]) -> dict[str, Any]:
-    out: dict[str, Any] = {"hub": user_input.get("hub") or ROOT_HUB_ID, "sleepy": bool(user_input.get("sleepy"))}
+    out: dict[str, Any] = {"sleepy": bool(user_input.get("sleepy"))}
+    if user_input.get("hub") and user_input["hub"] != AUTO_VALUE:
+        out["hub"] = user_input["hub"]
     if user_input.get("name"):
         out["name"] = user_input["name"].strip()
     if user_input.get("icon"):
@@ -396,15 +467,3 @@ def _valid_ip(value: str) -> bool:
         return False
     return True
 
-
-def _creates_cycle(hubs: list[dict[str, Any]], hub_id: str, new_parent: str) -> bool:
-    parents = {h["id"]: h.get("parent") for h in hubs}
-    parents[hub_id] = new_parent
-    seen = set()
-    cur: str | None = hub_id
-    while cur:
-        if cur in seen:
-            return True
-        seen.add(cur)
-        cur = parents.get(cur)
-    return False

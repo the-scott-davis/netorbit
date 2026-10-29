@@ -1,47 +1,83 @@
 track_device:
   fields:
-    mac:
-      example: "02:00:00:00:00:01"
-      selector:
-        text:
-    ip:
-      example: "10.0.0.50"
-      selector:
-        text:
-    name:
-      selector:
-        text:
-    icon:
-      selector:
-        icon:
-    hub:
-      example: "gateway"
-      selector:
-        text:
-    sleepy:
-      selector:
-        boolean:
-    config_entry_id:
-      selector:
-        config_entry:
-          integration: netorbit
+    mac: {example: "02:00:00:00:00:01", selector: {text: {}}}
+    ip: {example: "10.0.0.50", selector: {text: {}}}
+    name: {selector: {text: {}}}
+    icon: {selector: {icon: {}}}
+    hub: {selector: {text: {}}}
+    sleepy: {selector: {boolean: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
 
 ignore_device:
   fields:
-    mac:
-      selector:
-        text:
-    ip:
-      selector:
-        text:
-    config_entry_id:
-      selector:
-        config_entry:
-          integration: netorbit
+    mac: {selector: {text: {}}}
+    ip: {selector: {text: {}}}
+    device: {selector: {text: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
 
 scan_now:
   fields:
-    config_entry_id:
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+assign_device:
+  fields:
+    device: {required: true, example: "Living Room TV", selector: {text: {multiple: true}}}
+    hub: {required: true, example: "Upstairs", selector: {text: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+reset_placement:
+  fields:
+    device: {required: true, selector: {text: {multiple: true}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+add_hub:
+  fields:
+    name: {example: "Kitchen AP", selector: {text: {}}}
+    type:
+      default: access_point
       selector:
-        config_entry:
-          integration: netorbit
+        select:
+          options: [router, switch, access_point, mesh_node, other]
+    parent: {selector: {text: {}}}
+    ip: {selector: {text: {}}}
+    mac: {selector: {text: {}}}
+    device: {selector: {text: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+remove_hub:
+  fields:
+    hub: {required: true, selector: {text: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+import_client_list:
+  fields:
+    hub: {required: true, selector: {text: {}}}
+    text: {required: true, selector: {text: {multiline: true}}}
+    add_missing: {default: true, selector: {boolean: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+confirm_hub:
+  fields:
+    device: {required: true, selector: {text: {}}}
+    type:
+      selector:
+        select:
+          options: [router, switch, access_point, mesh_node, other]
+    name: {selector: {text: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+dismiss_hub:
+  fields:
+    device: {required: true, selector: {text: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+update_hub:
+  fields:
+    hub: {required: true, selector: {text: {}}}
+    name: {selector: {text: {}}}
+    type:
+      selector:
+        select:
+          options: [router, switch, access_point, mesh_node, other]
+    parent: {selector: {text: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
