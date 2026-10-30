@@ -76,7 +76,10 @@ from .logic import (
 )
 from .snmp import SnmpClient
 from .mdns import mdns_label, mdns_name
-from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
+from .sources import (
+    client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip,
+    tracker_names_by_mac, zigbee2mqtt_devices,
+)
 from .topology import Topology, infer, macs_close
 
 _LOGGER = logging.getLogger(__name__)
@@ -114,6 +117,8 @@ class Node:
     placement: str = PLACE_NONE  # manual | controller | snmp | none
     hub_source: str | None = None  # for hubs: manual | snmp | controller | detected
     ip_changes: int = 0  # how often DHCP has moved it since NetOrbit started tracking
+    transport: str = "ip"  # ip | zigbee
+    zigbee_role: str | None = None  # coordinator | router | end_device | unknown
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -786,6 +791,45 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
                 hostname=rec.get("hostname"), source="manual" if key in devices else "discovered",
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
+            )
+
+        # Zigbee2MQTT is a separate radio mesh, not a branch of the Ethernet or
+        # Wi-Fi topology above.  HA MQTT discovery is the source of truth here:
+        # it works with a renamed MQTT topic and does not need NetOrbit to open a
+        # second MQTT connection or call the Zigbee2MQTT web API.
+        zigbee = zigbee2mqtt_devices(self.hass)
+        coordinators = [d for d in zigbee if d.role == "coordinator"]
+        if zigbee:
+            sources.add("zigbee2mqtt")
+        if not coordinators and zigbee:
+            # Discovery normally creates the bridge device.  Keep devices visible
+            # if it was disabled, but mark the synthetic hub clearly.
+            coordinators = [None]
+        coordinator_keys: list[str] = []
+        for index, coordinator in enumerate(coordinators):
+            ident = coordinator.device_id if coordinator else f"unknown_{index}"
+            hub_id = f"zigbee2mqtt:{ident}"
+            coordinator_keys.append(hub_id)
+            nodes[f"hub:{hub_id}"] = Node(
+                key=f"hub:{hub_id}", kind="hub",
+                name=coordinator.name if coordinator else "Zigbee2MQTT coordinator",
+                icon="mdi:zigbee", link=ROOT_HUB_ID,
+                status=STATUS_ONLINE if coordinator and coordinator.online is True else "recent",
+                source="hub", hub_type="zigbee_coordinator", hub_source="zigbee2mqtt",
+                transport="zigbee", zigbee_role="coordinator",
+                vendor=coordinator.manufacturer if coordinator else None,
+            )
+        default_coordinator = coordinator_keys[0] if coordinator_keys else None
+        for device in zigbee:
+            if device.role == "coordinator":
+                continue
+            status = STATUS_ONLINE if device.online is True else (STATUS_STALE if device.online is False else "recent")
+            nodes[f"zigbee:{device.device_id}"] = Node(
+                key=f"zigbee:{device.device_id}", kind="device", name=device.name,
+                icon=guess_icon_from(f"{device.name} {device.model or ''}", device.manufacturer, "mdi:zigbee"),
+                link=default_coordinator or ROOT_HUB_ID, status=status,
+                source="zigbee2mqtt", vendor=device.manufacturer,
+                transport="zigbee", zigbee_role=device.role,
             )
 
         new_devices = []

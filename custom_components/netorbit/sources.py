@@ -21,6 +21,68 @@ class RegistryInfo:
     domain: str | None
 
 
+@dataclass
+class ZigbeeDevice:
+    """A physical Zigbee2MQTT device represented in Home Assistant's registries."""
+
+    device_id: str
+    name: str
+    manufacturer: str | None
+    model: str | None
+    role: str
+    online: bool | None
+
+
+def _z2m_identifier(dev: dr.DeviceEntry) -> str | None:
+    """Return a Zigbee2MQTT discovery identifier, not merely an MQTT device."""
+    for domain, identifier in dev.identifiers:
+        value = str(identifier)
+        if domain == "mqtt" and "zigbee2mqtt" in value.lower():
+            return value
+    return None
+
+
+def zigbee2mqtt_devices(hass: HomeAssistant) -> list[ZigbeeDevice]:
+    """Read Zigbee2MQTT devices from HA's MQTT-discovery device registry.
+
+    Zigbee2MQTT publishes discovery identifiers such as
+    ``zigbee2mqtt_0x00158d...`` and a bridge identifier.  This uses those
+    identifiers rather than entity-id names or MQTT topic assumptions, so it
+    supports renamed entities and custom Zigbee2MQTT base topics.  The normal
+    discovery payload does not include the mesh parent, so no parent/route is
+    invented here.
+    """
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+    out: list[ZigbeeDevice] = []
+    for dev in _all_devices(dev_reg):
+        identifier = _z2m_identifier(dev)
+        if not identifier or "_group_" in identifier.lower():
+            continue
+        entity_entries = list(er.async_entries_for_device(ent_reg, dev.id))
+        states = [hass.states.get(entry.entity_id) for entry in entity_entries]
+        is_bridge = "bridge" in identifier.lower()
+        role = "coordinator" if is_bridge else "unknown"
+        for entry, state in zip(entity_entries, states):
+            if not state:
+                continue
+            value = str(state.state).lower().replace("-", "_").replace(" ", "_")
+            unique_id = (entry.unique_id or "").lower()
+            if "device_type" in unique_id or "device_type" in state.attributes:
+                if value in ("router", "end_device", "enddevice", "coordinator"):
+                    role = "end_device" if value == "enddevice" else value
+                    break
+        # An unavailable discovery entity is a useful negative signal.  Lack of
+        # an availability entity must remain "recent", not falsely offline.
+        availability = [s for s in states if s and s.state in ("unavailable", "unknown")]
+        online: bool | None = False if states and len(availability) == len(states) else None
+        if states and not availability:
+            online = True
+        name = useful_name(dev.name_by_user) or useful_name(dev.name) or identifier
+        out.append(ZigbeeDevice(dev.id, name, dev.manufacturer, dev.model, role, online))
+    return out
+
+
 def _entry_ids(dev: dr.DeviceEntry) -> list[str]:
     """The config entries a device belongs to, on old and new Home Assistant.
 
