@@ -76,6 +76,8 @@ async def test_user_flow(hass: HomeAssistant, fake_net) -> None:
     assert result["data"] == {"subnet": "192.0.2.0/24", "gateway": GATEWAY}
     assert result["options"]["mode"] == "manual"
     assert result["options"]["hubs"][0]["id"] == "gateway"
+    # The "setup finished" dialog points people to adding the card.
+    assert result["description_placeholders"]["guide_url"].endswith("#add-the-map-to-a-dashboard")
     await hass.async_block_till_done()
 
     dup = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})

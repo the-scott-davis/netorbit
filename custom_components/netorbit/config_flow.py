@@ -43,6 +43,9 @@ from . import manage
 from .coordinator import options_with_defaults
 from .logic import extract_addresses, normalize_mac, validate_subnet
 
+# Shown in the "setup finished" dialog (translations can't contain URLs, so it's a placeholder).
+GUIDE_URL = "https://github.com/the-scott-davis/netorbit#add-the-map-to-a-dashboard"
+
 NONE_VALUE = "__none__"
 AUTO_VALUE = "__auto__"
 
@@ -115,6 +118,7 @@ class NetOrbitConfigFlow(ConfigFlow, domain=DOMAIN):
                             CONF_DEVICES: {},
                             CONF_IGNORED: [],
                         },
+                        description_placeholders={"guide_url": GUIDE_URL},
                     )
         schema = vol.Schema(
             {
