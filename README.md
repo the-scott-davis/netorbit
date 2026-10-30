@@ -90,6 +90,8 @@ Updates show up in **Settings > Updates** like any other. Updating still needs a
 2. Download **NetOrbit** and restart Home Assistant.
 3. Go to **Settings > Devices & services > Add integration > NetOrbit**.
 
+HACS on 2026.10 and older shows a blank icon for NetOrbit in its list. That's expected: older HACS only looks up icons on Home Assistant's brand site, which no longer takes new custom integrations. NetOrbit ships its own icon, which Home Assistant shows on the integration's page and the Marketplace shows everywhere.
+
 When you later update to 2026.11, Home Assistant moves NetOrbit into the Marketplace for you. Nothing to reinstall, and your settings stay.
 
 ### Manual
