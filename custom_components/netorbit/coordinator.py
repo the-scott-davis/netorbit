@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 from . import manage
 from .const import (
     CONF_AUTO_HUBS,
+    CONF_CHECK_INTERNET,
     CONF_DEVICES,
     CONF_DISCOVERY_INTERVAL,
     CONF_DISMISSED_HUBS,
@@ -43,6 +44,8 @@ from .const import (
     DOMAIN,
     EVENT_DEVICE_RECOVERED,
     EVENT_DEVICE_STALE,
+    EVENT_INTERNET_DOWN,
+    EVENT_INTERNET_UP,
     EVENT_NEW_DEVICE,
     HUB_AP,
     HUB_ICONS,
@@ -50,6 +53,9 @@ from .const import (
     HUB_OTHER,
     HUB_ROUTER,
     HUB_SWITCH,
+    INTERNET_DOWN_AFTER,
+    INTERNET_KEY,
+    INTERNET_TARGETS,
     MODE_AUTO,
     PLACE_CONTROLLER,
     PLACE_MANUAL,
@@ -142,6 +148,7 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_SNMP_ENABLED, DEFAULT_SNMP_ENABLED)
     opts.setdefault(CONF_SNMP_COMMUNITY, "")
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
+    opts.setdefault(CONF_CHECK_INTERNET, True)
     opts.setdefault(CONF_HUBS, [])
     opts.setdefault(CONF_DEVICES, {})
     opts.setdefault(CONF_IGNORED, [])
@@ -176,6 +183,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._last_snmp_probe: datetime | None = None
         self._prev_status: dict[str, str] = {}
         self._alive_keys: set[str] = set()  # keys that answered the last ping round
+        # Internet check: None until the first answer or INTERNET_DOWN_AFTER misses in a row.
+        self._internet_up: bool | None = None
+        self._internet_misses = 0
+        self._internet_changed: str | None = None  # when it last went up or down
         self._force_sweep = False
         self._force_probe = False
         self._privileged: bool | None = None
@@ -250,6 +261,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         except OSError as err:
             raise UpdateFailed(f"Network error: {err}") from err
 
+        self._note_internet(now, [k for k, _ in alive if k.startswith(f"{INTERNET_KEY}:")])
+        alive = [(k, ip) for k, ip in alive if not k.startswith(f"{INTERNET_KEY}:")]
         for key, ip in alive:
             rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
             rec["last_seen"] = now.isoformat()
@@ -693,6 +706,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         for key, ip in self._tracked_targets().items():
             if ip:
                 targets[key] = ip
+        if self.opts[CONF_CHECK_INTERNET]:
+            for ip in INTERNET_TARGETS:
+                targets[f"{INTERNET_KEY}:{ip}"] = ip
         if not targets:
             return []
         by_ip: dict[str, list[str]] = {}
@@ -708,6 +724,21 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 for key in by_ip.get(host.address, []):
                     alive.append((key, host.address))
         return alive
+
+    def _note_internet(self, now: datetime, answered: list[str]) -> None:
+        """Track whether the internet answers. One missed round is not enough to call it down."""
+        if not self.opts[CONF_CHECK_INTERNET]:
+            self._internet_up, self._internet_misses = None, 0
+            return
+        if answered:
+            self._internet_misses = 0
+            up = True
+        else:
+            self._internet_misses += 1
+            up = False if self._internet_misses >= INTERNET_DOWN_AFTER else self._internet_up
+        if up is not None and up != self._internet_up:
+            self._internet_changed = now.isoformat()
+        self._internet_up = up
 
     # ----- model ---------------------------------------------------------------
 
@@ -809,6 +840,22 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
             )
 
+        if self.opts[CONF_CHECK_INTERNET]:
+            # Above the router. Red (stale) only when the router answers and the internet doesn't;
+            # with the router down too, NetOrbit can't tell, so the status is left unknown.
+            router_up = f"hub:{ROOT_HUB_ID}" in alive_keys
+            if self._internet_up:
+                status = STATUS_ONLINE
+            elif self._internet_up is False and router_up:
+                status = STATUS_STALE
+            else:
+                status = ""
+            nodes[INTERNET_KEY] = Node(
+                key=INTERNET_KEY, kind=INTERNET_KEY, name="Internet", icon="mdi:web", link=None,
+                status=status, last_seen=self._internet_changed if self._internet_up else None,
+                source=INTERNET_KEY,
+            )
+
         new_devices = []
         if self.opts[CONF_MODE] != MODE_AUTO:
             ignored = set(self.opts[CONF_IGNORED])
@@ -849,6 +896,13 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     def _fire_transitions(self, data: NetOrbitData) -> None:
         for key, node in data.nodes.items():
             prev = self._prev_status.get(key)
+            if key == INTERNET_KEY:
+                if prev == STATUS_ONLINE and node.status == STATUS_STALE:
+                    self.hass.bus.async_fire(EVENT_INTERNET_DOWN, {"since": self._internet_changed})
+                elif prev == STATUS_STALE and node.status == STATUS_ONLINE:
+                    self.hass.bus.async_fire(EVENT_INTERNET_UP, {"since": self._internet_changed})
+                self._prev_status[key] = node.status
+                continue
             if prev is not None and prev != node.status:
                 payload = {"name": node.name, "ip": node.ip, "mac": node.mac, "kind": node.kind, "last_seen": node.last_seen}
                 if node.status == STATUS_STALE and not node.sleepy:

@@ -174,6 +174,29 @@ const assert = require("node:assert");
     await sp.close();
   }
 
+  // 11. The internet node: above the router, green when up, red with "Internet down" when not, and gone when turned off.
+  for (const [q, want] of [["", "online"], ["&internet=down", "stale"], ["&internet=off", null]]) {
+    const ip = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    ip.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await ip.goto("http://localhost:8766/scripts/preview/index.html?s=novice" + q);
+    await ip.waitForFunction(() => window.ready);
+    const c6 = ip.locator("netorbit-card");
+    const node = c6.locator('.node.inet[data-key="internet"]');
+    if (!want) {
+      assert.strictEqual(await node.count(), 0, "no internet node when the sensor is missing");
+    } else {
+      assert.ok(await c6.locator(`.node.inet.${want}`).count(), `internet node is ${want}`);
+      const ib = await node.locator("circle.disc").boundingBox(), rb = await c6.locator('.node.hub[data-key="hub:gw"] circle.disc, .node.hub circle.disc').first().boundingBox();
+      assert.ok(ib.y < rb.y, "internet sits above the router");
+      const text = await c6.locator("text.ilab").textContent();
+      assert.strictEqual(text, want === "stale" ? "Internet down" : "Internet");
+      await node.locator("circle.disc").hover();
+      assert.ok((await c6.locator(".tip").textContent()).includes(want === "stale" ? "Down" : "Up"), "tooltip says up or down");
+    }
+    console.log(`internet ${want || "off"} ok`);
+    await ip.close();
+  }
+
   await browser.close();
   console.log("ALL INTERACTIONS PASSED");
 })().catch((e) => { console.error(e); process.exit(1); });

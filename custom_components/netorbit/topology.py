@@ -111,15 +111,19 @@ def infer(
         if hub in leaf_hubs:
             by_port.setdefault(loc, []).append(hub)
 
+    top = {sw for sw in tables if result.hub_parent.get(sw) == root}
     known_hub_macs = {m for m in hub_macs.values() if m}
     for key, mac in device_macs.items():
         if not mac or mac in known_hub_macs:
             continue
         loc = locate(mac)
         if not loc:
-            # Seen only on ports that face the router: it's plugged into the router (or into
-            # something unmanaged hanging off it), or on the router's own Wi-Fi.
-            if any(uplink[sw] is not None and tables[sw].get(mac) == uplink[sw] for sw in tables):
+            # A switch plugged straight into the router sees it on its router-facing port, and
+            # no switch sees it anywhere else: it's plugged into the router (or into something
+            # unmanaged hanging off it), or on the router's own Wi-Fi. Only switches that hang
+            # off the router count. A switch further down only knows the device is "somewhere
+            # upstream", which is true of every device behind the first switch too.
+            if any(sw in top and uplink[sw] is not None and tables[sw].get(mac) == uplink[sw] for sw in tables):
                 result.device_hub[key] = root
             continue
         hubs_here = by_port.get(loc, [])

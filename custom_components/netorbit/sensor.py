@@ -86,7 +86,7 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
     @property
     def native_value(self) -> str | None:
         node = self._node
-        return node.status if node else None
+        return node.status if node and node.status in STATUSES else None
 
     @property
     def icon(self) -> str | None:

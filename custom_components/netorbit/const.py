@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "netorbit"
-VERSION: Final = "0.2.7"
+VERSION: Final = "0.2.8"
 
 # Config entry data
 CONF_SUBNET: Final = "subnet"
@@ -25,6 +25,7 @@ CONF_DISMISSED_HUBS: Final = "dismissed_hubs"
 CONF_SNMP_ENABLED: Final = "snmp_enabled"
 CONF_SNMP_COMMUNITY: Final = "snmp_community"
 CONF_GROUP_BY_TYPE: Final = "group_by_type"
+CONF_CHECK_INTERNET: Final = "check_internet"
 
 MODE_AUTO: Final = "auto"
 MODE_MANUAL: Final = "manual"
@@ -75,6 +76,14 @@ STATUSES: Final = [STATUS_ONLINE, STATUS_RECENT, STATUS_STALE]
 EVENT_NEW_DEVICE: Final = f"{DOMAIN}_new_device"
 EVENT_DEVICE_STALE: Final = f"{DOMAIN}_device_stale"
 EVENT_DEVICE_RECOVERED: Final = f"{DOMAIN}_device_recovered"
+EVENT_INTERNET_DOWN: Final = f"{DOMAIN}_internet_down"
+EVENT_INTERNET_UP: Final = f"{DOMAIN}_internet_up"
+
+# Internet check: big public DNS resolvers that answer pings. Down means none answer for
+# INTERNET_DOWN_AFTER ping rounds in a row while the router still answers.
+INTERNET_KEY: Final = "internet"
+INTERNET_TARGETS: Final = ("1.1.1.1", "8.8.8.8")
+INTERNET_DOWN_AFTER: Final = 2
 
 # Services
 SERVICE_TRACK: Final = "track_device"

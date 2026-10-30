@@ -160,7 +160,7 @@ async def test_new_hub_takes_its_port_at_once(hass: HomeAssistant, fake_net) -> 
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
 
-    by_mac = {s.attributes.get("mac", "").lower(): s for s in _node_states(hass).values()}
+    by_mac = {(s.attributes.get("mac") or "").lower(): s for s in _node_states(hass).values()}
     assert by_mac[pc].attributes["link"] == "hub:gateway" and by_mac[pc].attributes["placement"] == "snmp"
     assert by_mac[plug].attributes["link"] == "hub:core_switch"
 
@@ -176,7 +176,7 @@ async def test_new_hub_takes_its_port_at_once(hass: HomeAssistant, fake_net) -> 
     res = await hass.services.async_call(
         DOMAIN, "confirm_hub", {"device": MAYBE_MAC, "type": "access_point", "name": "Attic AP"}, blocking=True, return_response=True
     )
-    by_mac = {s.attributes.get("mac", "").lower(): s for s in _node_states(hass).values()}
+    by_mac = {(s.attributes.get("mac") or "").lower(): s for s in _node_states(hass).values()}
     assert by_mac[plug].attributes["link"] == f"hub:{res['hub']}"
     assert swept == []
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.8
+
+### Added
+- **Internet node.** An Internet globe sits just above the router. Each ping round also pings two public DNS servers (1.1.1.1 and 8.8.8.8). It turns red ("Internet down") when neither answers for two rounds in a row while the router still answers, and grey when the router isn't answering either. Comes with `sensor.netorbit_internet` and `netorbit_internet_down` / `netorbit_internet_up` events. On by default; turn it off under Settings ("Show the internet on the map"), or hide just the node with the card option `show_internet: false`.
+
+### Fixed
+- 0.2.7 could move a wireless device to the router after a restart, when the switch next to the router had forgotten it but a switch further down still listed it on its uplink. Only switches plugged straight into the router count as proof that a device is wired to the router now; otherwise the device keeps its last placement.
+
 ## 0.2.7
 
 ### Fixed

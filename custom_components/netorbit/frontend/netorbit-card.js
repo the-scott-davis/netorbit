@@ -2,7 +2,7 @@
  * Draws a live radial map from the NetOrbit integration's sensors.
  * https://github.com/the-scott-davis/netorbit  (MIT)
  */
-const NETORBIT_VERSION = "0.2.7";
+const NETORBIT_VERSION = "0.2.8";
 
 const NO_STATUS = {
   online: { color: "#34d399", label: "Online" },
@@ -182,7 +182,7 @@ class NetOrbitCard extends HTMLElement {
 
   setConfig(config) {
     this._config = Object.assign(
-      { title: "Network", height: 900, show_ip: false, show_legend: true, hide_sleepy_offline: false, group_by_type: true },
+      { title: "Network", height: 900, show_ip: false, show_legend: true, hide_sleepy_offline: false, group_by_type: true, show_internet: true },
       config || {}
     );
     this._sig = "";
@@ -223,6 +223,7 @@ class NetOrbitCard extends HTMLElement {
     const hubs = {};
     const devices = [];
     let summary = null;
+    let internet = null;
     let root = null;
     const sig = [];
     states.forEach((s) => {
@@ -230,6 +231,13 @@ class NetOrbitCard extends HTMLElement {
       if (a.kind === "summary") {
         summary = s;
         sig.push(JSON.stringify([a.new_devices, a.suggested_hubs, a.group_by_type]));
+        return;
+      }
+      if (a.kind === "internet") {
+        if (cfg.show_internet !== false) {
+          internet = { key: "internet", entity: s.entity_id, kind: "internet", label: a.label || "Internet", status: NO_STATUS[s.state] ? s.state : "unknown", last_seen: a.last_seen };
+          sig.push(["internet", internet.status].join("~"));
+        }
         return;
       }
       const reg = (hass.entities || {})[s.entity_id] || {};
@@ -257,7 +265,7 @@ class NetOrbitCard extends HTMLElement {
       }
     });
     if (!root && Object.keys(hubs).length) root = Object.keys(hubs)[0];
-    if (!root) return { hubs, devices, root, summary, sig: sig.join("|"), suggestions: {} };
+    if (!root) return { hubs, devices, root, summary, internet, sig: sig.join("|"), suggestions: {} };
 
     // Suggested hubs: mark the device if we track it, otherwise show it in the "new" bubble.
     const suggestions = {};
@@ -318,7 +326,7 @@ class NetOrbitCard extends HTMLElement {
       devices.length = 0;
       devices.push(...kept);
     }
-    return { hubs, devices, root, summary, suggestions, sig: sig.join("|") };
+    return { hubs, devices, root, summary, internet, suggestions, sig: sig.join("|") };
   }
 
   _render(model) {
@@ -354,6 +362,19 @@ class NetOrbitCard extends HTMLElement {
       const faint = h.kind === "group" ? "faint" : "strong";
       links += `<path class="lk ${faint} ${live(s) ? "live" : ""} ${h.kind === "newhub" ? "dashed" : ""}" d="${curve(p, pos[h.key], 0)}" stroke="${col(s)}"/>`;
     });
+    // The internet sits just above the router: green when public DNS servers answer, red when they
+    // don't but the router does, grey when NetOrbit can't tell.
+    const inet = model.internet;
+    if (inet) {
+      // Straight up, unless a link from the router already runs there; then the nearest clear diagonal.
+      const out = Object.values(hubs).filter((h) => h.key !== root && pos[h.key] && (hubs[h.parent] ? h.parent : root) === root)
+        .map((h) => Math.atan2(pos[h.key].y - C.y, pos[h.key].x - C.x));
+      const gap = (a) => Math.min(Math.PI, ...out.map((b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)))));
+      const clear = [-90, -125, -55].map((d) => (d * Math.PI) / 180).find((x) => gap(x) > 0.35);
+      const a = clear === undefined ? -Math.PI / 2 : clear;
+      pos.internet = { x: +(C.x + 62 * Math.cos(a)).toFixed(1), y: +(C.y + 62 * Math.sin(a)).toFixed(1) };
+      links += `<path class="lk strong ${live(inet.status) ? "live" : ""} ${inet.status === "unknown" ? "dashed" : ""}" d="M${C.x},${C.y} L${pos.internet.x},${pos.internet.y}" stroke="${col(inet.status)}"/>`;
+    }
     devices.forEach((d) => {
       const p = pos[d.key];
       if (!p || !pos[p.hub]) return;
@@ -453,6 +474,15 @@ class NetOrbitCard extends HTMLElement {
         `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" transform="rotate(${rot.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)})" text-anchor="${flip ? "end" : "start"}" dominant-baseline="middle" class="dlab" style="font-size:${fs.toFixed(1)}px${d.suggested ? `;fill:${NO_SUGGEST.light}` : ""}">${noEsc(noTrunc(d.label, maxChars))}</text></g>`;
     });
 
+    if (inet) {
+      const ip = pos.internet, c = col(inet.status);
+      gfx += `<g class="node inet ${inet.status}" data-key="internet">` +
+        (live(inet.status) ? `<circle cx="${ip.x}" cy="${ip.y}" r="21" class="halo" fill="${c}"/>` : "") +
+        `<circle cx="${ip.x}" cy="${ip.y}" r="16" class="disc ${inet.status === "stale" ? "pulse" : ""}" stroke="${c}"/>` +
+        iconFO(ip, 16, "mdi:web", c) + `</g>`;
+      labels += `<g class="hlabels" pointer-events="none"><text x="${ip.x + 24}" y="${ip.y + 5}" class="hlab ilab" style="text-anchor:start${inet.status === "stale" ? `;fill:${c}` : ""}">${inet.status === "stale" ? "Internet down" : "Internet"}</text></g>`;
+    }
+
     const counts = { online: 0, recent: 0, stale: 0, new: 0 };
     devices.forEach((d) => {
       if (d.kind === "more") { d.members.forEach((m) => { if (counts[m.status] !== undefined) counts[m.status]++; }); return; }
@@ -497,6 +527,7 @@ class NetOrbitCard extends HTMLElement {
   @keyframes pulse { 50% { stroke-width:5; } }
   .hlab { fill:#f1f5f9; font-size:15px; font-weight:600; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }
   .hlab.glab { fill:#cbd5e1; font-size:13px; font-weight:500; }
+  .hlab.ilab { font-size:13px; font-weight:600; }
   .hsub { fill:#94a3b8; font-size:12px; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }
   .dlab { fill:#cbd5e1; }
   .dev.recent .dlab { fill:#fde68a; }
@@ -624,6 +655,7 @@ class NetOrbitCard extends HTMLElement {
     const all = {};
     Object.values(hubs).forEach((h) => (all[h.key] = h));
     devices.forEach((d) => (all[d.key] = d));
+    if (model.internet) all.internet = model.internet;
     const root = model.root;
     const col = (s) => (s === "group" ? "#64748b" : (NO_STATUS[s] || NO_STATUS.unknown).color);
     const tip = this.shadowRoot.querySelector(".tip");
@@ -732,6 +764,13 @@ class NetOrbitCard extends HTMLElement {
       const counts = {};
       n.members.forEach((m) => (counts[m.status] = (counts[m.status] || 0) + 1));
       return `<b>${noEsc(n.label)}</b><div>${Object.entries(counts).map(([s, c]) => `${c} ${(NO_STATUS[s] || NO_STATUS.unknown).label.toLowerCase()}`).join(", ")}</div><div style="color:#94a3b8">Tap to list them. Devices with problems are always shown on the map.</div>`;
+    }
+    if (n.kind === "internet") {
+      const what = n.status === "online" ? "Public DNS servers are answering."
+        : n.status === "stale" ? "Your router answers, but public DNS servers don't. Your internet connection looks down."
+        : "NetOrbit can't tell right now: your router isn't answering either, or the check just started.";
+      return `<b>Internet</b><div><span class="k">Status</span><span style="color:${col(n.status)}">${n.status === "online" ? "Up" : n.status === "stale" ? "Down" : "Unknown"}</span></div>` +
+        `<div>${what}</div>` + (n.status === "online" && n.last_seen ? `<div><span class="k">Came up</span>${noRel(n.last_seen)}</div>` : "");
     }
     if (n.kind === "newhub") return `<b>New devices</b><div>Found on the network but not tracked yet, plus anything that might be a hub. Tap one to decide.</div>`;
     if (n.kind === "group") return `<b>${noEsc(n.label)}</b><div>NetOrbit does not know which access point or switch these use yet. Use Edit layout, the NetOrbit settings, or an AI assistant to place them.</div>`;

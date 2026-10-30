@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from . import manage
-from .const import CONF_DEVICES, CONF_HUBS, CONF_IGNORED, HUB_AP, ROOT_HUB_ID
+from .const import CONF_DEVICES, CONF_HUBS, CONF_IGNORED, HUB_AP, INTERNET_KEY, ROOT_HUB_ID
 from .logic import extract_addresses, normalize_mac
 
 if TYPE_CHECKING:
@@ -63,6 +63,12 @@ def _name(coord: NetOrbitCoordinator, key: str) -> str:
     return node.name if node else coord._discovered_name(key, coord.known_device(key) or {})  # noqa: SLF001
 
 
+def _internet_status(data: Any) -> str | None:
+    """online, stale (down while the router answers), unknown, or None when the check is off."""
+    node = data.nodes.get(INTERNET_KEY) if data else None
+    return None if node is None else (node.status or "unknown")
+
+
 def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
     """The whole map in a compact form."""
     data = coord.data
@@ -70,6 +76,8 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
     devices = []
     if data:
         for node in data.nodes.values():
+            if node.kind == INTERNET_KEY:
+                continue
             if node.kind == "hub":
                 hubs.append({
                     "id": node.key.removeprefix("hub:"), "name": node.name, "type": node.hub_type,
@@ -88,6 +96,7 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
         "new_devices": data.new_devices if data else [],
         "suggested_hubs": data.suggested_hubs if data else [],
         "automatic_sources": data.sources if data else [],
+        "internet": _internet_status(data),
         "mode": coord.opts.get("mode"),
     }
 
