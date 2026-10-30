@@ -5,7 +5,7 @@ name: E2E
 
 on:
   push:
-    branches: [main, ci/ha-e2e]
+    branches: [main]
   pull_request:
   workflow_dispatch:
   schedule:
