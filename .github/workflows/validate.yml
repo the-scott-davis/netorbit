@@ -39,6 +39,13 @@ jobs:
           node-version: "22"
       - run: node --test tests/card.test.js
 
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No real network addresses in code, tests or docs
+        run: python3 scripts/check_examples.py
+
   secrets:
     runs-on: ubuntu-latest
     steps:

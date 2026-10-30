@@ -1,7 +1,7 @@
 track_device:
   fields:
-    mac: {example: "02:00:00:00:00:01", selector: {text: {}}}
-    ip: {example: "10.0.0.50", selector: {text: {}}}
+    mac: {example: "00:00:5E:00:53:01", selector: {text: {}}}
+    ip: {example: "192.0.2.50", selector: {text: {}}}
     name: {selector: {text: {}}}
     icon: {selector: {icon: {}}}
     hub: {selector: {text: {}}}

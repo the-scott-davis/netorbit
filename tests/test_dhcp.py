@@ -10,7 +10,7 @@ from .conftest import GATEWAY
 from .test_dhcp_helpers import advance
 from .test_integration import _entry, _node_states, _setup
 
-AP = "00:00:5f:00:53:04"
+AP = "00:00:5f:00:53:04"  # example-ok: synthetic test value
 TV = "00:00:5e:00:53:10"
 NEW = "00:00:5e:00:53:30"
 

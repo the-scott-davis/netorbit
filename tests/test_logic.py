@@ -36,8 +36,8 @@ def test_normalize_mac(raw, expected):
 
 
 def test_random_mac():
-    assert is_random_mac("02:00:5e:00:00:0a")
-    assert is_random_mac("DA:00:00:00:00:01")
+    assert is_random_mac("02:00:5e:00:00:0a")  # example-ok: synthetic test value
+    assert is_random_mac("DA:00:00:00:00:01")  # example-ok: synthetic test value
     assert not is_random_mac("00:00:5e:00:53:0b")
     assert not is_random_mac(None)
 
@@ -91,7 +91,7 @@ def test_parse_arp():
 def test_validate_subnet():
     assert validate_subnet("192.0.2.7/24", 1024) == "192.0.2.0/24"
     with pytest.raises(ValueError, match="too_large"):
-        validate_subnet("10.0.0.0/16", 1024)
+        validate_subnet("10.0.0.0/16", 1024)  # example-ok: synthetic test value
     with pytest.raises(ValueError):
         validate_subnet("not a subnet", 1024)
 

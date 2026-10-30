@@ -41,6 +41,6 @@ const fs = require("fs");
   }
   console.log(`drew ${files.length} networks, ${problems.length} problems`);
   [...new Set(problems)].slice(0, 30).forEach((p) => console.log("  " + p));
-  fs.writeFileSync("/tmp/claude-0/-home-claude/1ddf03a3-649b-59ec-b8f5-c36ac310208a/scratchpad/fuzz_problems.txt", problems.join("\n"));
+  fs.writeFileSync(require("path").join(require("os").tmpdir(), "netorbit_fuzz_problems.txt"), problems.join("\n"));
   await browser.close();
 })().catch((e) => { console.error(e); process.exit(1); });

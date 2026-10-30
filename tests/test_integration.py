@@ -66,7 +66,7 @@ async def test_user_flow(hass: HomeAssistant, fake_net) -> None:
     )
     assert result["errors"] == {"gateway": "gateway_outside"}
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"subnet": "10.0.0.0/16", "gateway": "10.0.0.1", "mode": "auto", "ping_interval": 60}
+        result["flow_id"], {"subnet": "10.0.0.0/16", "gateway": "10.0.0.1", "mode": "auto", "ping_interval": 60}  # example-ok: synthetic test value
     )
     assert result["errors"] == {"subnet": "subnet_too_large"}
     result = await hass.config_entries.flow.async_configure(

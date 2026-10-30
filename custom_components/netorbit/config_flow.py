@@ -61,7 +61,7 @@ async def _default_subnet(hass) -> tuple[str, str]:
                     return str(net), str(next(net.hosts()))
     except Exception:  # noqa: BLE001
         pass
-    return "192.168.0.0/24", "192.168.0.1"
+    return "192.168.0.0/24", "192.168.0.1"  # example-ok: fallback when the network can't be detected
 
 
 def _int_box(minimum: int, maximum: int, unit: str) -> sel.NumberSelector:

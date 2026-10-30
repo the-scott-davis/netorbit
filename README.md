@@ -236,7 +236,10 @@ python -m venv .venv && . .venv/bin/activate
 pip install -r requirements_test.txt
 pytest
 node --test tests/card.test.js
+python scripts/check_examples.py
 ```
+
+Examples, tests and docs only use the address ranges reserved for documentation (`192.0.2.x`, `00:00:5e:00:53:xx`), never values from a real network. `scripts/check_examples.py` enforces that, and CI runs it on every push.
 
 Preview the card with fake data: `npm i @mdi/js@7.4.47` and copy `node_modules/@mdi/js/mdi.js` to `scripts/preview/`, serve the repo root (`python -m http.server 8766`), and open `http://localhost:8766/scripts/preview/index.html?s=full` (or `mesh`, `flat`, `novice`). `scripts/preview/interact.js` drives edit mode in a real browser with Playwright.
 

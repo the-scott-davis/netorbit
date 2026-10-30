@@ -67,8 +67,8 @@ def test_router_with_its_own_table():
 
 def test_macs_close():
     assert macs_close("00:00:5e:00:53:04", "00:00:5e:00:53:06")
-    assert macs_close("00:00:5e:00:53:04", "02:00:5e:00:53:05")  # locally administered radio MAC
-    assert not macs_close("00:00:5e:00:53:04", "00:00:5e:00:54:04")
+    assert macs_close("00:00:5e:00:53:04", "02:00:5e:00:53:05")  # locally administered radio MAC  example-ok
+    assert not macs_close("00:00:5e:00:53:04", "00:00:5e:00:54:04")  # example-ok: synthetic test value
     assert not macs_close("00:00:5e:00:53:04", None)
 
 
@@ -107,10 +107,10 @@ def test_pretty_vendor():
 
 def test_extract_addresses():
     text = """Name        IP            MAC                 Signal
-Kitchen TV  10.0.0.21     00-00-5E-00-53-10   -54 dBm
-Camera      10.0.0.22     0000.5e00.5311      -61 dBm
-Broadcast   10.0.0.255
+Kitchen TV  10.0.0.21     00-00-5E-00-53-10   -54 dBm  # example-ok: synthetic test value
+Camera      10.0.0.22     0000.5e00.5311      -61 dBm  # example-ok: synthetic test value
+Broadcast   10.0.0.255  # example-ok: synthetic test value
 plug        00:00:5e:00:53:13 (no ip)"""
     macs, ips = extract_addresses(text)
     assert macs == [TV, CAM, PLUG]
-    assert ips == ["10.0.0.21", "10.0.0.22"]
+    assert ips == ["10.0.0.21", "10.0.0.22"]  # example-ok: synthetic test value

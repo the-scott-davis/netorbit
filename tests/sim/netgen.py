@@ -181,7 +181,7 @@ def flat(rng: random.Random, n: int = 12) -> Network:
 
 
 def mesh_no_data(rng: random.Random, nodes: int = 3, n: int = 20) -> Network:
-    b = Builder("mesh_no_data", rng, subnet="192.0.2.0/24" if n < 200 else "10.20.0.0/22")
+    b = Builder("mesh_no_data", rng, subnet="192.0.2.0/24" if n < 200 else "10.20.0.0/22")  # example-ok: synthetic test value
     b.net.nodes["router"].vendor = "eero"
     b.net.nodes["router"].mac = b.mac("eero")
     for i in range(nodes - 1):
@@ -219,7 +219,7 @@ def snmp_single(rng: random.Random, aps: int = 2, n: int = 20, community: str = 
 
 def snmp_chain(rng: random.Random, depth: int = 3, n: int = 30, community: str = "public") -> Network:
     """Router > sw0 > sw1 > sw2 ..., APs and an unmanaged switch hanging off the chain."""
-    b = Builder("snmp_chain", rng, subnet="192.0.2.0/24" if n < 200 else "10.20.0.0/22")
+    b = Builder("snmp_chain", rng, subnet="192.0.2.0/24" if n < 200 else "10.20.0.0/22")  # example-ok: synthetic test value
     b.net.community = community
     parent = "router"
     for i in range(depth):
@@ -254,7 +254,7 @@ def random_network(seed: int) -> Network:
     """Anything goes: random shape, sizes, quirks."""
     rng = random.Random(seed)
     big = rng.random() < 0.08
-    subnet = "10.20.0.0/22" if big else "192.0.2.0/24"
+    subnet = "10.20.0.0/22" if big else "192.0.2.0/24"  # example-ok: synthetic test value
     b = Builder(f"random{seed}", rng, subnet=subnet, gateway_last=rng.choice([1, 1, 1, 2, 254]))
     community = rng.choice(["public", "public", "s3cretRO"])
     b.net.community = community

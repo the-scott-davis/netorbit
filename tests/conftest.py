@@ -11,7 +11,7 @@ pytest_plugins = "pytest_homeassistant_custom_component"
 
 SUBNET = "192.0.2.0/24"
 GATEWAY = "192.0.2.1"
-MAC_A = "02:00:5e:00:00:0a"  # randomized style (locally administered)
+MAC_A = "02:00:5e:00:00:0a"  # randomized style (locally administered)  example-ok
 MAC_B = "00:00:5e:00:53:0b"  # IANA documentation range
 MAC_C = "00:00:5e:00:53:0c"
 

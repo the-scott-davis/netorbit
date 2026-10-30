@@ -13,10 +13,10 @@ from .test_integration import _entry, _node_states, _setup, _summary
 
 GW_MAC = "00:00:5e:00:53:01"
 SW_MAC = "00:00:5e:00:53:02"
-AP_MAC = "00:00:5f:00:53:04"
+AP_MAC = "00:00:5f:00:53:04"  # example-ok: synthetic test value
 TV_MAC = "00:00:5e:00:53:10"
 NAS_MAC = "00:00:5e:00:53:12"
-MAYBE_MAC = "00:00:5f:00:53:20"
+MAYBE_MAC = "00:00:5f:00:53:20"  # example-ok: synthetic test value
 
 
 def _network(fake_net, community: str = "public") -> None:
@@ -83,11 +83,11 @@ async def test_custom_community(hass: HomeAssistant, fake_net) -> None:
 async def test_suggestions_confirm_and_dismiss(hass: HomeAssistant, fake_net) -> None:
     _network(fake_net)
     fake_net.alive.add("192.0.2.21")
-    fake_net.arp["192.0.2.21"] = "00:00:5f:00:53:21"
+    fake_net.arp["192.0.2.21"] = "00:00:5f:00:53:21"  # example-ok: synthetic test value
     entry = _entry("auto")
     await _setup(hass, entry)
     keys = {s["key"] for s in _summary(hass).attributes["suggested_hubs"]}
-    assert keys == {MAYBE_MAC, "00:00:5f:00:53:21"}
+    assert keys == {MAYBE_MAC, "00:00:5f:00:53:21"}  # example-ok: synthetic test value
 
     res = await hass.services.async_call(
         DOMAIN, "confirm_hub", {"device": MAYBE_MAC, "type": "mesh_node", "name": "Den Node"}, blocking=True, return_response=True
@@ -97,7 +97,7 @@ async def test_suggestions_confirm_and_dismiss(hass: HomeAssistant, fake_net) ->
     await hass.async_block_till_done()
     assert _summary(hass).attributes["suggested_hubs"] == []
     assert any(h["name"] == "Den Node" and h["type"] == "mesh_node" for h in entry.options["hubs"])
-    assert "00:00:5f:00:53:21" in entry.options["dismissed_hubs"]
+    assert "00:00:5f:00:53:21" in entry.options["dismissed_hubs"]  # example-ok: synthetic test value
 
 
 async def test_manual_beats_automatic_and_reset(hass: HomeAssistant, fake_net) -> None:
@@ -148,7 +148,7 @@ async def test_controller_placement(hass: HomeAssistant, fake_net) -> None:
     await _setup(hass, entry)
     await hass.services.async_call(DOMAIN, "confirm_hub", {"device": "192.0.2.6", "type": "access_point", "name": "Hall AP"}, blocking=True)
     # A UniFi style tracker reports the TV on the AP's radio MAC (one byte off).
-    hass.states.async_set("device_tracker.tv", "home", {"mac": TV_MAC, "ap_mac": "00:00:5f:00:53:05"})
+    hass.states.async_set("device_tracker.tv", "home", {"mac": TV_MAC, "ap_mac": "00:00:5f:00:53:05"})  # example-ok: synthetic test value
     await entry.runtime_data.async_refresh()
     tv = next(n for n in _node_states(hass).values() if n.attributes["mac"] == TV_MAC.upper())
     assert tv.attributes["link"] == "hub:hall_ap"
