@@ -175,6 +175,30 @@ function noGroupFor(icon) {
   return "other";
 }
 
+// The whole map in SVG units. Zooming shows a part of it with the same aspect ratio, so the card keeps its size.
+const NO_VIEW = { x: -70, y: -40, w: 1140, h: 1090 };
+const NO_ZOOM_MAX = 5;
+
+/** The view after a zoom or pan gesture. Pure; exported for tests.
+ *  `view` is the view the gesture started from (null = the whole map), `anchor` the map point that was under the
+ *  finger (or pointer, or the midpoint of a pinch) when it started, `now` the map point under it at this moment in
+ *  that same starting view, and `factor` how much to zoom in (above 1) or out (below 1). The anchor stays under the
+ *  finger, so a plain drag pans and a pinch zooms about the fingers. The result is kept inside the whole map and is
+ *  null once zoomed all the way out. */
+function netorbitZoomView(view, anchor, now, factor, base = NO_VIEW, max = NO_ZOOM_MAX) {
+  const v = view || base;
+  const scale = Math.min(max, Math.max(1, (base.w / v.w) * factor));
+  const w = base.w / scale, h = base.h / scale;
+  if (w >= base.w - 0.5) return null;
+  const x = anchor.x - (now.x - v.x) * (w / v.w);
+  const y = anchor.y - (now.y - v.y) * (h / v.h);
+  return {
+    x: Math.min(Math.max(x, base.x), base.x + base.w - w),
+    y: Math.min(Math.max(y, base.y), base.y + base.h - h),
+    w, h,
+  };
+}
+
 class NetOrbitCard extends HTMLElement {
   static getStubConfig() {
     return { title: "Network" };
@@ -182,11 +206,12 @@ class NetOrbitCard extends HTMLElement {
 
   setConfig(config) {
     this._config = Object.assign(
-      { title: "Network", height: 900, show_ip: false, show_legend: true, hide_sleepy_offline: false, group_by_type: true, show_internet: true },
+      { title: "Network", height: 900, show_ip: false, show_legend: true, hide_sleepy_offline: false, group_by_type: true, show_internet: true, zoom: true },
       config || {}
     );
     this._sig = "";
     this._edit = false;
+    this._view = null; // the part of the map on show; null is the whole map
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
   }
 
@@ -195,7 +220,9 @@ class NetOrbitCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._drag || this._popOpen) return; // never redraw under the user's finger
+    // Never redraw under the user's finger. A zoom gesture whose end was never seen (a lost pointer event)
+    // stops holding updates back after 15 s.
+    if (this._drag || this._popOpen || (this._zooming && Date.now() - this._zooming < 15000)) return;
     const model = this._model();
     const sig = JSON.stringify([model.sig, this._edit]);
     if (sig === this._sig) return;
@@ -507,7 +534,7 @@ class NetOrbitCard extends HTMLElement {
   .editbtn.on { background:#2563eb; border-color:#2563eb; color:#fff; }
   .editbtn ha-icon { --mdc-icon-size:16px; }
   .banner { margin:6px 18px 0; padding:8px 12px; border-radius:8px; background:rgba(37,99,235,.15); border:1px solid rgba(96,165,250,.35); font-size:13px; color:#dbeafe; }
-  .wrap { position:relative; touch-action:${edit ? "none" : "auto"}; }
+  .wrap { position:relative; }
   svg { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); width:100%; height:auto; display:block; max-height:${Number(cfg.height) || 900}px; user-select:none; -webkit-user-select:none; }
   .ring { fill:none; stroke:rgba(148,163,184,.07); stroke-width:1; }
   .lk { fill:none; stroke-width:1.4; opacity:.45; }
@@ -542,6 +569,12 @@ class NetOrbitCard extends HTMLElement {
   .node.hot .disc { stroke:#60a5fa !important; stroke-width:6; }
   .pendring { fill:none; stroke:#60a5fa; stroke-width:2.5; stroke-dasharray:10 8; animation: spin 1.2s linear infinite; transform-box:fill-box; transform-origin:center; }
   .ghost { fill:rgba(96,165,250,.25); stroke:#60a5fa; stroke-width:2; pointer-events:none; }
+  .zoomctl { position:absolute; right:10px; bottom:10px; display:flex; flex-direction:column; gap:6px; z-index:1; }
+  .zoomctl button { width:32px; height:32px; padding:0; border-radius:50%; border:1px solid rgba(148,163,184,.3); background:rgba(15,23,42,.85); color:#cbd5e1; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .zoomctl button:hover { border-color:rgba(96,165,250,.6); color:#fff; }
+  .zoomctl ha-icon { --mdc-icon-size:18px; }
+  .zoomctl .zfit { display:none; }
+  .wrap.zoomed .zoomctl .zfit { display:flex; }
   .tip { position:absolute; pointer-events:none; background:rgba(15,23,42,.96); border:1px solid rgba(148,163,184,.25); border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.55; color:#e2e8f0; min-width:190px; max-width:280px; box-shadow:0 10px 30px rgba(0,0,0,.45); opacity:0; transition:opacity .12s; z-index:2; }
   .tiptip { margin-top:6px; padding-top:6px; border-top:1px solid rgba(148,163,184,.2); color:#93c5fd; }
   .tip b { font-size:13.5px; display:block; margin-bottom:2px; }
@@ -574,7 +607,7 @@ class NetOrbitCard extends HTMLElement {
   </div>
   ${edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename or remove it.</div>` : ""}
   <div class="wrap">
-    <svg class="map" viewBox="-70 -40 1140 1090" role="img" aria-label="Network map">
+    <svg class="map" viewBox="${NO_VIEW.x} ${NO_VIEW.y} ${NO_VIEW.w} ${NO_VIEW.h}" role="img" aria-label="Network map">
       <defs><filter id="noblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>
       <circle class="ring" cx="${C.x}" cy="${C.y}" r="370"/>
       ${links}
@@ -582,6 +615,7 @@ class NetOrbitCard extends HTMLElement {
       <circle class="ghost" r="17" cx="-500" cy="-500"/>
     </svg>
     <div class="tip"></div>
+    ${cfg.zoom !== false ? `<div class="zoomctl"><button class="zin" title="Zoom in" aria-label="Zoom in"><ha-icon icon="mdi:plus"></ha-icon></button><button class="zout" title="Zoom out" aria-label="Zoom out"><ha-icon icon="mdi:minus"></ha-icon></button><button class="zfit" title="Whole map" aria-label="Whole map"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button></div>` : ""}
   </div>
   ${cfg.show_legend ? `<div class="legend">
     <span>Moving line = answering pings</span>
@@ -590,12 +624,14 @@ class NetOrbitCard extends HTMLElement {
     <span><i class="dot" style="background:#a78bfa"></i>Allowed to sleep</span>
     ${nSug ? `<span><i class="dot" style="background:${NO_SUGGEST.color}"></i>Might be a hub, tap to confirm</span>` : ""}
     ${grouped ? `<span>Grouped by type until NetOrbit knows where they connect</span>` : ""}
+    ${cfg.zoom !== false ? `<span>Pinch, double-tap or Ctrl+scroll to zoom</span>` : ""}
   </div>` : ""}
 </ha-card>`;
 
     const btn = this.shadowRoot.querySelector(".editbtn");
     if (btn) btn.addEventListener("click", () => { this._edit = !this._edit; this._sig = ""; this.hass = this._hass; });
     this._wire(model);
+    this._wireZoom();
     this._resolveIcons();
   }
 
@@ -757,6 +793,117 @@ class NetOrbitCard extends HTMLElement {
         if (n.entity) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: n.entity }, bubbles: true, composed: true }));
       });
     });
+  }
+
+  // Zoom and pan: pinch or drag with a finger, Ctrl/Cmd + scroll wheel (a trackpad pinch), a double-tap on the
+  // background, or the buttons. Only the SVG's viewBox changes. Node taps, drags and tooltips already map pointer
+  // positions through the SVG's own transform, so they need no change.
+  _wireZoom() {
+    const wrap = this.shadowRoot.querySelector(".wrap");
+    const svg = this.shadowRoot.querySelector("svg.map");
+    const ctl = this.shadowRoot.querySelector(".zoomctl");
+    if (!wrap || !svg) return;
+    const apply = () => {
+      const v = this._view || NO_VIEW;
+      svg.setAttribute("viewBox", `${v.x.toFixed(1)} ${v.y.toFixed(1)} ${v.w.toFixed(1)} ${v.h.toFixed(1)}`);
+      wrap.classList.toggle("zoomed", !!this._view);
+      // Zoomed in (or placing devices) the map takes every touch. Otherwise one finger scrolls the page past the
+      // map as it always did, and only a pinch is the map's.
+      wrap.style.touchAction = this._edit || this._view ? "none" : this._config.zoom === false ? "auto" : "pan-y";
+    };
+    apply();
+    if (this._config.zoom === false) return;
+
+    const toMap = (x, y, inv) => { const pt = svg.createSVGPoint(); pt.x = x; pt.y = y; return pt.matrixTransform(inv); };
+    const inverse = () => { const m = svg.getScreenCTM(); return m ? m.inverse() : null; };
+    const zoomBy = (factor, at) => {
+      const v = this._view || NO_VIEW;
+      const f = at || { x: v.x + v.w / 2, y: v.y + v.h / 2 };
+      this._view = netorbitZoomView(this._view, f, f, factor);
+      apply();
+    };
+    if (ctl) {
+      ctl.querySelector(".zin").addEventListener("click", () => zoomBy(1.6));
+      ctl.querySelector(".zout").addEventListener("click", () => zoomBy(1 / 1.6));
+      ctl.querySelector(".zfit").addEventListener("click", () => { this._view = null; apply(); });
+    }
+    svg.addEventListener("wheel", (ev) => {
+      if (!(ev.ctrlKey || ev.metaKey)) return; // a plain wheel keeps scrolling the page
+      const inv = inverse();
+      if (!inv) return;
+      ev.preventDefault();
+      // A trackpad pinch arrives as many small deltas; a mouse wheel notch is capped to about 1.6x.
+      zoomBy(Math.exp(Math.max(-0.5, Math.min(0.5, -ev.deltaY * 0.01))), toMap(ev.clientX, ev.clientY, inv));
+    }, { passive: false });
+    // Safari: a pinch over the map must not zoom the page as well, and two fingers must not scroll it.
+    ["gesturestart", "gesturechange"].forEach((t) => svg.addEventListener(t, (ev) => ev.preventDefault()));
+    svg.addEventListener("touchmove", (ev) => { if (ev.touches.length > 1 && ev.cancelable) ev.preventDefault(); }, { passive: false });
+
+    // Fingers (or the mouse button) on the map right now, and the gesture they are making.
+    const fingers = new Map();
+    let g = null, lastTap = null;
+    const mid = () => {
+      const p = [...fingers.values()];
+      return p.length > 1
+        ? { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2, d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) }
+        : { x: p[0].x, y: p[0].y, d: 0 };
+    };
+    // (Re)start the gesture from where the fingers are now: on the first touch and whenever a finger lands or lifts.
+    const begin = () => {
+      const inv = inverse();
+      if (!inv) { g = null; return; }
+      const m = mid();
+      g = { view: this._view, inv, m, anchor: toMap(m.x, m.y, inv), moved: !!(g && g.moved), pinched: !!(g && g.pinched) || fingers.size > 1, captured: !!(g && g.captured) };
+    };
+    svg.addEventListener("pointerdown", (ev) => {
+      if (this._drag || (ev.pointerType === "mouse" && ev.button !== 0)) return; // a device is being dragged
+      if (!fingers.size) this._swallowClick = false;
+      fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (fingers.size > 2) return;
+      begin();
+      this._zooming = Date.now();
+    });
+    svg.addEventListener("pointermove", (ev) => {
+      if (!g || !fingers.has(ev.pointerId) || this._drag) return;
+      fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      const m = mid();
+      if (!g.moved && Math.hypot(m.x - g.m.x, m.y - g.m.y) < 6 && Math.abs(m.d - g.m.d) < 6) return;
+      g.moved = true;
+      this._zooming = Date.now();
+      // Keep the events coming when the pointer leaves the map. Touches are captured by their first target already.
+      if (!g.captured) { g.captured = true; fingers.forEach((_, id) => { try { svg.setPointerCapture(id); } catch (e) { /* pointer gone */ } }); }
+      const factor = g.m.d && m.d ? m.d / g.m.d : 1;
+      this._view = netorbitZoomView(g.view, g.anchor, toMap(m.x, m.y, g.inv), factor);
+      apply();
+    });
+    const end = (ev) => {
+      if (!fingers.has(ev.pointerId)) return;
+      fingers.delete(ev.pointerId);
+      if (fingers.size) { begin(); return; } // one finger left after a pinch: carry on panning from here
+      const acted = !!(g && (g.moved || g.pinched));
+      const tap = !!g && !acted && ev.type === "pointerup" && !(ev.target.closest && ev.target.closest(".node"));
+      this._swallowClick = acted;
+      g = null;
+      this._zooming = 0;
+      if (tap) {
+        // A second tap on the background within 350 ms zooms in there, or back out to the whole map.
+        if (lastTap && ev.timeStamp - lastTap.t < 350 && Math.hypot(ev.clientX - lastTap.x, ev.clientY - lastTap.y) < 30) {
+          lastTap = null;
+          const inv = inverse();
+          if (this._view) { this._view = null; apply(); } else if (inv) zoomBy(2.5, toMap(ev.clientX, ev.clientY, inv));
+        } else lastTap = { t: ev.timeStamp, x: ev.clientX, y: ev.clientY };
+      }
+      if (acted && this._hass) this.hass = this._hass; // draw whatever changed during the gesture
+    };
+    svg.addEventListener("pointerup", end);
+    svg.addEventListener("pointercancel", end);
+    // A pan or pinch is not a tap on whatever node the finger started on.
+    svg.addEventListener("click", (ev) => {
+      if (!this._swallowClick) return;
+      this._swallowClick = false;
+      ev.stopPropagation();
+      ev.preventDefault();
+    }, true);
   }
 
   _tipHtml(n, hubs, col) {
@@ -973,5 +1120,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, netorbitZoomView };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");
