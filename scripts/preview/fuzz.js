@@ -16,7 +16,7 @@ const fs = require("fs");
     await page.waitForFunction(() => window.ready);
     const r = await page.evaluate(() => {
       const root = document.querySelector("netorbit-card").shadowRoot;
-      const svg = root.querySelector("svg");
+      const svg = root.querySelector("svg.map");
       if (!svg) return { empty: root.textContent.slice(0, 80) };
       const html = svg.outerHTML;
       const nan = /NaN|Infinity|undefined/.test(html);
@@ -29,13 +29,22 @@ const fs = require("fs");
       }
       let devClash = 0;
       for (let i = 0; i < devs.length; i++) for (let j = i + 1; j < devs.length; j++) if (Math.hypot(devs[i].x - devs[j].x, devs[i].y - devs[j].y) < 12) devClash++;
-      const states = Object.values(window.__s || {});
-      return { nan, hubs: hubs.length, devs: devs.length, overlap, devClash };
+      // Hub labels whose text boxes overlap each other.
+      const boxes = [...root.querySelectorAll("g.hlabels")].map((g) => g.getBBox());
+      let labelClash = 0;
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j];
+        const ox = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        if (ox > 4 && oy > 4) labelClash++;
+      }
+      return { nan, hubs: hubs.length, devs: devs.length, overlap, devClash, labelClash, labels: boxes.length };
     });
     if (errors.length) problems.push(`${f}: page error ${errors[0]}`);
     if (r.empty) problems.push(`${f}: nothing drawn (${r.empty})`);
     if (r.nan) problems.push(`${f}: NaN/undefined in drawing`);
     if (r.overlap) problems.push(`${f}: ${r.overlap} overlapping hubs (${r.hubs} hubs, ${r.devs} devices)`);
+    if (r.labelClash) problems.push(`${f}: ${r.labelClash} hub labels overlapping (${r.labels} labels)`);
     if (r.devClash) problems.push(`${f}: ${r.devClash} device pairs drawn on top of each other (${r.devs} devices)`);
     if ((r.overlap || 0) > worst.overlap) worst = { f, ...r };
   }

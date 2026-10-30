@@ -174,4 +174,16 @@ async def _register_card(hass: HomeAssistant) -> None:
         return
     from homeassistant.components.frontend import add_extra_js_url  # noqa: PLC0415
 
-    add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+    # Version the URL by the file's contents, so browsers pick up a changed card right away,
+    # even between releases.
+    digest = await hass.async_add_executor_job(_file_digest, path)
+    add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}-{digest}")
+
+
+def _file_digest(path: Path) -> str:
+    import hashlib  # noqa: PLC0415
+
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:10]
+    except OSError:
+        return "0"

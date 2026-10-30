@@ -21,6 +21,18 @@ class RegistryInfo:
     domain: str | None
 
 
+def _entry_ids(dev: dr.DeviceEntry) -> list[str]:
+    """The config entries a device belongs to, on old and new Home Assistant.
+
+    Newer versions give each device one `config_entry_id` and deprecate the
+    `config_entries` set; older ones only have the set.
+    """
+    if hasattr(dev, "config_entry_id"):
+        entry_id = dev.config_entry_id
+        return [entry_id] if entry_id else []
+    return list(getattr(dev, "config_entries", ()) or ())
+
+
 def _all_devices(reg: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
     """Every device entry, on old and new Home Assistant.
 
@@ -43,7 +55,7 @@ def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
         if not macs:
             continue
         domain = None
-        for entry_id in dev.config_entries:
+        for entry_id in _entry_ids(dev):
             entry = hass.config_entries.async_get_entry(entry_id)
             if entry and entry.domain in NETWORK_DOMAINS:
                 domain = entry.domain

@@ -142,3 +142,13 @@ def test_icon_from_vendor_when_name_says_nothing():
     assert guess_icon_from("Device 12:34", "ecobee inc") == "mdi:thermostat"
     assert guess_icon_from("Device 12:34", "Realtek Semiconductor") == "mdi:lan-connect"
     assert guess_icon_from("Device 12:34", None) == "mdi:lan-connect"
+
+
+def test_entry_ids_old_and_new_registry():
+    from types import SimpleNamespace
+
+    from custom_components.netorbit.sources import _entry_ids
+
+    assert _entry_ids(SimpleNamespace(config_entry_id="abc", config_entries={"abc", "old"})) == ["abc"]
+    assert _entry_ids(SimpleNamespace(config_entry_id=None)) == []
+    assert sorted(_entry_ids(SimpleNamespace(config_entries={"a", "b"}))) == ["a", "b"]

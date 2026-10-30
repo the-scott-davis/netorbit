@@ -351,6 +351,8 @@ class NetOrbitCard extends HTMLElement {
 
     let gfx = "";
     let labels = "";
+    // Text boxes of hub labels placed so far; the router's label always sits right below it.
+    const placedLabels = [{ x0: C.x - 45, y0: C.y + 32 + 5, x1: C.x + 45, y1: C.y + 32 + 30 }];
     Object.values(hubs).forEach((h) => {
       const p = pos[h.key];
       if (!p) return;
@@ -359,28 +361,44 @@ class NetOrbitCard extends HTMLElement {
       const isGroup = h.kind === "group";
       const r = isRoot ? 32 : isGroup ? 19 : 25;
       const c = col(isNew ? "new" : h.status);
-      // Label below, above, right or left: the first side with room, judged against other hubs and the router's label.
-      const obstacles = Object.values(hubs).filter((o) => o.key !== h.key && pos[o.key]).map((o) => pos[o.key]);
-      if (!isRoot) obstacles.push({ x: C.x, y: C.y + 32 + 30 });
-      devices.forEach((d) => { const q = pos[d.key]; if (q && Math.abs(q.x - p.x) < 160 && Math.abs(q.y - p.y) < 90) obstacles.push(q); });
-      const room = (x, y) => Math.min(1e9, ...obstacles.map((o) => Math.hypot((o.x - x) * 0.6, o.y - y)));
-      const sides = [
-        { side: "below", x: p.x, y1: p.y + r + 21, cx: p.x, cy: p.y + r + 28, anchor: "middle" },
-        { side: "above", x: p.x, y1: p.y - r - 27, cx: p.x, cy: p.y - r - 20, anchor: "middle" },
-        { side: "right", x: p.x + r + 10, y1: p.y - 2, cx: p.x + r + 55, cy: p.y + 6, anchor: "start" },
-        { side: "left", x: p.x - r - 10, y1: p.y - 2, cx: p.x - r - 55, cy: p.y + 6, anchor: "end" },
-      ];
-      if (!(isRoot || p.y >= C.y - 4)) sides.unshift(sides.splice(1, 1)[0]);
-      const pick = isRoot ? sides[0] : (sides.find((s) => room(s.cx, s.cy) >= 46) || sides.reduce((a, s) => (room(s.cx, s.cy) > room(a.cx, a.cy) ? s : a)));
-      const ly1 = pick.y1;
-      const ly2 = ly1 + 16;
-      const lx = pick.x;
-      const anchor = pick.anchor;
       let sub = isNew
         ? `${devices.filter((d) => d.kind === "new").length} waiting`
         : isGroup ? `${h.count} devices`
         : (cfg.show_ip && h.ip) ? h.ip : (NO_HUB_TYPE[h.hub_type] || "");
       if (String(sub).toLowerCase() === String(h.label).toLowerCase()) sub = "";
+      // Label below, above, right or left: the first side whose text box doesn't touch another
+      // label, a hub or a nearby device. Otherwise the side that overlaps least.
+      const shown = noTrunc(h.label, 26);
+      const w = Math.max(String(shown).length * (isGroup ? 7.4 : 8.6), String(sub).length * 6.8) + 10;
+      const hgt = sub ? 38 : 22;
+      const box = (s) => {
+        const x0 = s.anchor === "middle" ? s.x - w / 2 : s.anchor === "start" ? s.x : s.x - w;
+        return { x0, y0: s.y1 - 16, x1: x0 + w, y1: s.y1 - 16 + hgt };
+      };
+      const overlap = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+      const square = (q, rr) => ({ x0: q.x - rr, y0: q.y - rr, x1: q.x + rr, y1: q.y + rr });
+      const discs = Object.values(hubs).filter((o) => o.key !== h.key && pos[o.key])
+        .map((o) => square(pos[o.key], (o.key === root ? 32 : o.kind === "group" ? 19 : 25) + 6));
+      const near = devices.map((d) => pos[d.key]).filter((q) => q && Math.abs(q.x - p.x) < 220 && Math.abs(q.y - p.y) < 120).map((q) => square(q, 19));
+      const cost = (s) => {
+        const b = box(s);
+        return placedLabels.reduce((n, o) => n + 4 * overlap(b, o), 0)
+          + discs.reduce((n, o) => n + 3 * overlap(b, o), 0)
+          + near.reduce((n, o) => n + overlap(b, o), 0);
+      };
+      const sides = [
+        { side: "below", x: p.x, y1: p.y + r + 21, anchor: "middle" },
+        { side: "above", x: p.x, y1: p.y - r - 27, anchor: "middle" },
+        { side: "right", x: p.x + r + 10, y1: p.y - 2, anchor: "start" },
+        { side: "left", x: p.x - r - 10, y1: p.y - 2, anchor: "end" },
+      ];
+      if (!(isRoot || p.y >= C.y - 4)) sides.unshift(sides.splice(1, 1)[0]);
+      const pick = isRoot ? sides[0] : (sides.find((s) => cost(s) === 0) || sides.reduce((a, s) => (cost(s) < cost(a) ? s : a)));
+      if (!isRoot) placedLabels.push(box(pick));
+      const ly1 = pick.y1;
+      const ly2 = ly1 + 16;
+      const lx = pick.x;
+      const anchor = pick.anchor;
       const target = edit && h.kind === "hub" ? "target" : "";
       gfx += `<g class="node hub ${isGroup ? "group" : ""} ${target}" data-key="${noEsc(h.key)}">` +
         (isGroup ? "" : `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r + 9}" class="halo" fill="${c}"/>`) +

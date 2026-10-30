@@ -70,6 +70,20 @@
     }), ["Device 9C:04"]),
 
     // A typical mesh home where nothing reports which node a device uses.
+    // Several hubs straight off the router with long names, everything else grouped by type.
+    hubs: summary(build((hub, dev) => {
+      hub("gateway", "Router", "router", null);
+      hub("sw1", "PoE Switch (8 port)", "switch", "gateway");
+      hub("ap1", "Hallway AP", "access_point", "gateway");
+      hub("ap2", "Upstairs Bedroom AP", "access_point", "gateway");
+      hub("sw2", "Rack Switch 16-Port (Main)", "switch", "gateway");
+      ["Family Room TV:mdi:television", "Bedroom TV:mdi:television", "Streamer:mdi:television-play", "Kitchen Speaker:mdi:speaker", "Game Console:mdi:gamepad-variant",
+       "Laptop:mdi:laptop", "Desktop:mdi:monitor", "Tablet:mdi:tablet", "Printer:mdi:printer", "NAS:mdi:nas",
+       "Doorbell:mdi:doorbell-video", "Front Cam:mdi:cctv", "Back Cam:mdi:cctv", "Garage Cam:mdi:cctv",
+       "Thermostat:mdi:thermostat", "Smart Plug:mdi:power-socket-us", "Robot Vac:mdi:robot-vacuum", "Garage Door:mdi:garage", "Lamp:mdi:lightbulb", "Air Purifier:mdi:air-purifier",
+       "Device 4B:12:mdi:lan-connect", "Device 7C:01:mdi:lan-connect"]
+        .forEach((s) => { const parts = s.split(":"); const ic = parts.slice(-2).join(":"); const l = parts.slice(0, -2).join(":"); dev(l, ic, "gateway", "online", false, "none"); });
+    }), [], [["Shed AP", "access_point", ["its name looks like an access point"]]]),
     novice: summary(build((hub, dev) => {
       hub("gateway", "Router", "router", null);
       hub("m1", "Mesh Node 2", "mesh_node", "gateway");
