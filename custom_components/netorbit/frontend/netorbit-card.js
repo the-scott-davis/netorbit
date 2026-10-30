@@ -12,6 +12,9 @@ const NO_STATUS = {
   unknown: { color: "#64748b", label: "Unknown" },
 };
 
+// Possible hubs get a color of their own, so they never look like "seen recently".
+const NO_SUGGEST = { color: "#f472b6", light: "#f9a8d4", soft: "rgba(244,114,182,.5)" };
+
 const NO_HUB_TYPE = {
   router: "Router",
   switch: "Switch",
@@ -340,7 +343,7 @@ class NetOrbitCard extends HTMLElement {
     devices.forEach((d) => {
       const p = pos[d.key];
       if (!p || !pos[p.hub]) return;
-      links += `<path class="lk ${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""}" d="${curve(pos[p.hub], p)}" stroke="${col(d.status)}"/>`;
+      links += `<path class="lk ${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""} ${d.suggested ? "sug" : ""}" d="${curve(pos[p.hub], p)}" stroke="${d.suggested ? NO_SUGGEST.color : col(d.status)}"/>`;
     });
 
     const iconFO = (p, r, icon, color) =>
@@ -393,7 +396,7 @@ class NetOrbitCard extends HTMLElement {
     devices.forEach((d) => {
       const p = pos[d.key];
       if (!p) return;
-      const c = col(d.status);
+      const c = d.suggested ? NO_SUGGEST.color : col(d.status);
       const deg = (p.a * 180) / Math.PI;
       const nd = ((deg % 360) + 360) % 360;
       const flip = nd > 90 && nd < 270;
@@ -407,7 +410,7 @@ class NetOrbitCard extends HTMLElement {
         iconFO(p, 15, d.icon, c) +
         (d.sleepy ? `<circle cx="${(p.x + 11).toFixed(1)}" cy="${(p.y - 11).toFixed(1)}" r="5" class="zz"/>` : "") +
         (d.placement === "manual" && edit ? `<circle cx="${(p.x - 11).toFixed(1)}" cy="${(p.y - 11).toFixed(1)}" r="4.5" class="pin"/>` : "") +
-        `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" transform="rotate(${rot.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)})" text-anchor="${flip ? "end" : "start"}" dominant-baseline="middle" class="dlab" style="font-size:${fs.toFixed(1)}px">${noEsc(noTrunc(d.label, maxChars))}</text></g>`;
+        `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" transform="rotate(${rot.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)})" text-anchor="${flip ? "end" : "start"}" dominant-baseline="middle" class="dlab" style="font-size:${fs.toFixed(1)}px${d.suggested ? `;fill:${NO_SUGGEST.light}` : ""}">${noEsc(noTrunc(d.label, maxChars))}</text></g>`;
     });
 
     const counts = { online: 0, recent: 0, stale: 0, new: 0 };
@@ -429,7 +432,7 @@ class NetOrbitCard extends HTMLElement {
   .title ha-icon { --mdc-icon-size:22px; color:#60a5fa; }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:#cbd5e1; background:rgba(148,163,184,.08); border:1px solid rgba(148,163,184,.14); padding:4px 10px; border-radius:999px; font-variant-numeric:tabular-nums; }
   .chip i { width:8px; height:8px; border-radius:50%; display:inline-block; }
-  .chip.sug { border-color:rgba(251,191,36,.45); color:#fde68a; }
+  .chip.sug { border-color:rgba(244,114,182,.5); color:#f9a8d4; }
   .editbtn { font:inherit; font-size:12.5px; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; border:1px solid rgba(96,165,250,.45); background:transparent; color:#bfdbfe; cursor:pointer; }
   .editbtn.on { background:#2563eb; border-color:#2563eb; color:#fff; }
   .editbtn ha-icon { --mdc-icon-size:16px; }
@@ -447,7 +450,7 @@ class NetOrbitCard extends HTMLElement {
   .disc { fill:#0f172a; stroke-width:2.2; }
   .disc.dashed { stroke-dasharray:4 4; }
   .halo { opacity:.13; filter:url(#noblur); }
-  .sugring { fill:none; stroke:#fbbf24; stroke-width:2; stroke-dasharray:3 3; animation: spin 6s linear infinite; transform-box:fill-box; transform-origin:center; }
+  .sugring { fill:none; stroke:#f472b6; stroke-width:2; stroke-dasharray:3 3; animation: spin 6s linear infinite; transform-box:fill-box; transform-origin:center; }
   @keyframes spin { to { transform:rotate(360deg); } }
   .pin { fill:#60a5fa; stroke:#0f172a; stroke-width:1.5; }
   .pulse { animation: pulse 1.8s ease-in-out infinite; }
@@ -495,7 +498,7 @@ class NetOrbitCard extends HTMLElement {
   <div class="head">
     <div class="title"><ha-icon icon="mdi:orbit"></ha-icon>${noEsc(cfg.title)}</div>
     ${chip("online")}${chip("recent")}${chip("stale")}${counts.new ? chip("new") : ""}
-    ${nSug ? `<span class="chip sug"><i style="background:#fbbf24"></i>${nSug} possible hub${nSug > 1 ? "s" : ""}</span>` : ""}
+    ${nSug ? `<span class="chip sug"><i style="background:${NO_SUGGEST.color}"></i>${nSug} possible hub${nSug > 1 ? "s" : ""}</span>` : ""}
     ${admin ? `<button class="editbtn ${edit ? "on" : ""}"><ha-icon icon="${edit ? "mdi:check" : "mdi:pencil"}"></ha-icon>${edit ? "Done" : "Edit layout"}</button>` : ""}
   </div>
   ${edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename or remove it.</div>` : ""}
@@ -514,7 +517,7 @@ class NetOrbitCard extends HTMLElement {
     <span><i class="dot" style="background:${NO_STATUS.recent.color}"></i>Seen in the last ${noEsc(staleH)} h</span>
     <span><i class="dot" style="background:${NO_STATUS.stale.color}"></i>Not seen for ${noEsc(staleH)} h+</span>
     <span><i class="dot" style="background:#a78bfa"></i>Allowed to sleep</span>
-    ${nSug ? `<span><i class="dot" style="background:#fbbf24"></i>Might be a hub, tap to confirm</span>` : ""}
+    ${nSug ? `<span><i class="dot" style="background:${NO_SUGGEST.color}"></i>Might be a hub, tap to confirm</span>` : ""}
     ${grouped ? `<span>Grouped by type until NetOrbit knows where they connect</span>` : ""}
   </div>` : ""}
 </ha-card>`;
@@ -627,7 +630,7 @@ class NetOrbitCard extends HTMLElement {
     if (n.kind === "group") return `<b>${noEsc(n.label)}</b><div>NetOrbit does not know which access point or switch these use yet. Use Edit layout, the NetOrbit settings, or an AI assistant to place them.</div>`;
     const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
     return `<b>${noEsc(n.label)}</b>` +
-      (n.suggested ? `<div style="color:#fde68a">Might be a ${noEsc((n.suggested.type || "hub").replace("_", " "))}: ${noEsc((n.suggested.reasons || []).join(", "))}</div>` : "") +
+      (n.suggested ? `<div style="color:${NO_SUGGEST.light}">Might be a ${noEsc((n.suggested.type || "hub").replace("_", " "))}: ${noEsc((n.suggested.reasons || []).join(", "))}</div>` : "") +
       `<div><span class="k">Status</span><span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · sleeps" : ""}</div>` +
       (n.ip ? `<div><span class="k">IP</span>${noEsc(n.ip)}</div>` : "") +
       (n.mac ? `<div><span class="k">MAC</span>${noEsc(n.mac)}</div>` : "") +

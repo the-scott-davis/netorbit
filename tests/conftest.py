@@ -38,6 +38,7 @@ class FakeNet:
         self.snmp: dict[str, tuple[str, object]] = {}
         self.tables: dict[str, dict[str, int]] = {}
         self.dns: dict[str, str] = {}
+        self.mdns: dict[str, str] = {}  # ip -> Bonjour name, e.g. "Office-iMac.local"
         self.vendors: dict[str, str] = {}  # "AA:BB:CC" -> vendor name
 
     async def snmp_probe(self, _client, ip, community):
@@ -51,6 +52,9 @@ class FakeNet:
         if entry and entry[0] == community:
             return dict(self.tables.get(ip, {}))
         return None
+
+    async def mdns_name(self, ip, timeout=1.0):
+        return self.mdns.get(ip)
 
     async def multiping(self, addresses, **kwargs):
         return [FakeHost(a, a in self.alive) for a in addresses]
@@ -67,6 +71,7 @@ def fake_net():
         patch("icmplib.async_ping", side_effect=net.ping),
         patch("custom_components.netorbit.coordinator._read_arp", side_effect=lambda: dict(net.arp)),
         patch("custom_components.netorbit.coordinator._reverse_dns", side_effect=lambda ip: net.dns.get(ip)),
+        patch("custom_components.netorbit.coordinator.mdns_name", side_effect=net.mdns_name),
         patch("aiooui.is_loaded", return_value=True),
         patch("aiooui.get_vendor", side_effect=lambda prefix: net.vendors.get(prefix)),
         patch("custom_components.netorbit.snmp.SnmpClient.probe", autospec=True, side_effect=net.snmp_probe),

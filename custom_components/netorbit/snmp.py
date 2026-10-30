@@ -119,8 +119,15 @@ class SnmpClient:
 def _load():
     """Import pysnmp and build the engine off the event loop (both are slow)."""
     import pysnmp.hlapi.v3arch.asyncio as mod  # noqa: PLC0415
+    from pysnmp.smi import view  # noqa: PLC0415
 
-    return mod, mod.SnmpEngine()
+    engine = mod.SnmpEngine()
+    # pysnmp reads its MIB files from disk on first use. Do that here, off the event loop,
+    # the same way Home Assistant's own SNMP integration does.
+    controller = view.MibViewController(engine.message_dispatcher.mib_instrum_controller.get_mib_builder())
+    engine.cache["mibViewController"] = controller
+    controller.mibBuilder.load_modules()
+    return mod, engine
 
 
 def _value(val: Any) -> Any:

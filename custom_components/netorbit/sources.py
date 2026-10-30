@@ -21,11 +21,23 @@ class RegistryInfo:
     domain: str | None
 
 
+def _all_devices(reg: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
+    """Every device entry, on old and new Home Assistant.
+
+    Newer versions want `registry.devices` iterated (it yields entries); older ones
+    hand back a mapping whose iteration yields ids.
+    """
+    entries = list(reg.devices)
+    if entries and isinstance(entries[0], str):
+        return list(reg.devices.values())
+    return entries
+
+
 def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
     """Every device in Home Assistant that has a MAC connection, keyed by MAC."""
     reg = dr.async_get(hass)
     out: dict[str, RegistryInfo] = {}
-    for dev in reg.devices.values():
+    for dev in _all_devices(reg):
         macs = [normalize_mac(v) for k, v in dev.connections if k == dr.CONNECTION_NETWORK_MAC]
         macs = [m for m in macs if m]
         if not macs:

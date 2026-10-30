@@ -275,7 +275,10 @@ async def test_names_from_other_integrations(hass: HomeAssistant, fake_net) -> N
     er.async_get(hass).async_get_or_create("binary_sensor", "ping", "p13", config_entry=ping, suggested_object_id="ping_nas")
     hass.states.async_set("binary_sensor.ping_nas", "on", {"friendly_name": "Ping NAS"})
 
+    # Bonjour fills in a name when nothing else in Home Assistant knows the device.
+    fake_net.mdns["192.0.2.12"] = "Alexs-MacBook.local."
+
     await _setup(hass, _entry("auto"))
     names = set(_node_states(hass))
-    assert {"Pool", "Hall Thermostat", "NAS", "Device 53:0C"} <= names
+    assert {"Pool", "Hall Thermostat", "NAS", "Alexs MacBook"} <= names
     assert not any(":" in n and n.count(":") >= 5 for n in names)

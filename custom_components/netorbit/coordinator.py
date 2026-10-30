@@ -75,6 +75,7 @@ from .logic import (
     subnet_hosts,
 )
 from .snmp import SnmpClient
+from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
 from .topology import Topology, infer, macs_close
 
@@ -408,7 +409,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             rec["vendor"] = None if is_random_mac(mac) else pretty_vendor(aiooui.get_vendor(mac[:8].upper()))
 
     async def _resolve_names(self, now: datetime) -> None:
-        """Reverse DNS for devices we have no recent hostname for."""
+        """Reverse DNS, then Bonjour, for devices we have no recent hostname for."""
         todo = []
         for key, rec in self._seen.items():
             ip = rec.get("ip")
@@ -428,9 +429,12 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     )
                 except (TimeoutError, asyncio.TimeoutError):
                     name = None
+                host = short_hostname(name)
+                if not host:
+                    # Many routers don't publish local names. Ask the device itself over Bonjour.
+                    host = mdns_label(await mdns_name(ip))
                 rec = self._seen[key]
                 rec["dns_checked"] = now.isoformat()
-                host = short_hostname(name)
                 if host:
                     rec["hostname"] = host
 

@@ -10,8 +10,8 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
 
 ## What it does
 
-- **Finds every device.** Sweeps your subnet, learns MAC addresses from the ARP table, and names devices from Home Assistant's device list, their network hostname, or their maker.
-- **Finds your network gear.** Spots routers, switches, access points and mesh nodes from who made them, what they call themselves, what they announce on the network, and what other integrations already know. Obvious ones are added for you. Likely ones show up with a spinning yellow ring and a one-tap "It's a hub / Not a hub".
+- **Finds every device.** Sweeps your subnet, learns MAC addresses from the ARP table, and names devices from what your setup already knows: Home Assistant's device list, device trackers, Ping sensors you've set up, your router's local DNS, or the name the device announces over Bonjour. When nothing knows a name, it falls back to the maker (for example "Apple 28:54"), and you can rename it.
+- **Finds your network gear.** Spots routers, switches, access points and mesh nodes from who made them, what they call themselves, what they announce on the network, and what other integrations already know. Obvious ones are added for you. Likely ones show up with a spinning pink ring and a one-tap "It's a hub / Not a hub".
 - **Works out where each device connects, when your network will say:**
   - **Managed switches with SNMP:** NetOrbit reads their MAC address tables and works out which switch port, and so which access point, every device is behind. No port mapping needed.
   - **UniFi**, and other integrations that report which access point each client uses (Netgear/Orbi's per-device "connected AP" sensors, for example).

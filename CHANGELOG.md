@@ -13,7 +13,9 @@ First public beta.
 - DHCP handling: everything is keyed by MAC, hubs follow their MAC to new IPs, devices added by IP switch to their MAC, IP change counts with DHCP reservation tips on the card.
 - `netorbit.export_config` and `netorbit.import_config` to back up and restore your setup.
 - Large networks fold quiet devices into "+N more" bubbles (`max_devices`, default 80). Problem devices and possible hubs always stay on the map.
-- Devices are grouped by type until NetOrbit knows where they connect.
+- Devices are grouped by type until NetOrbit knows where they connect, using the name or, failing that, the maker.
+- Names come from Home Assistant's device list (skipping entries that are just a MAC), device trackers, Ping sensors you already set up, the router's local DNS, and Bonjour.
+- Possible hubs have their own color (pink), so they never look like "seen recently".
 - Network simulator and browser tests covering hundreds of generated home networks.
 
 ### Changed
