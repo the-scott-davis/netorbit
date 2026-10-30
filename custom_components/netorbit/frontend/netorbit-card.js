@@ -21,7 +21,10 @@ const NO_HUB_TYPE = {
   access_point: "Access point",
   mesh_node: "Mesh node",
   other: "Hub",
+  zigbee_coordinator: "Zigbee coordinator",
 };
+
+const NO_ZIGBEE_ROLE = { coordinator: "Coordinator", router: "Router", end_device: "End device", unknown: "Zigbee device (role not reported)" };
 
 function noEsc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -232,9 +235,10 @@ class NetOrbitCard extends HTMLElement {
         key: a.node_key, entity: s.entity_id, label: reg.name || a.label || a.friendly_name, ip: a.ip, mac: a.mac, ip_changes: a.ip_changes || 0,
         kind: a.kind, link: a.link, parent: a.link, sleepy: a.sleepy === true, last_seen: a.last_seen,
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
+        transport: a.transport || "ip", zigbee_role: a.zigbee_role,
         status: NO_STATUS[s.state] ? s.state : "unknown",
       };
-      sig.push([n.key, n.status, n.link, n.label, icon, n.sleepy ? 1 : 0, n.placement].join("~"));
+      sig.push([n.key, n.status, n.link, n.label, icon, n.sleepy ? 1 : 0, n.placement, n.transport, n.zigbee_role].join("~"));
       if (a.kind === "hub") {
         hubs[n.key] = n;
         if (!n.link && !root) root = n.key;
@@ -338,12 +342,12 @@ class NetOrbitCard extends HTMLElement {
       const p = pos[hubs[h.parent] ? h.parent : root];
       const s = h.kind === "newhub" ? "new" : h.status;
       const faint = h.kind === "group" ? "faint" : "strong";
-      links += `<path class="lk ${faint} ${live(s) ? "live" : ""} ${h.kind === "newhub" ? "dashed" : ""}" d="${curve(p, pos[h.key], 0)}" stroke="${col(s)}"/>`;
+      links += `<path class="lk ${faint} ${live(s) && h.transport !== "zigbee" ? "live" : ""} ${h.kind === "newhub" || h.transport === "zigbee" ? "dashed" : ""}" d="${curve(p, pos[h.key], 0)}" stroke="${h.transport === "zigbee" ? "#a78bfa" : col(s)}"/>`;
     });
     devices.forEach((d) => {
       const p = pos[d.key];
       if (!p || !pos[p.hub]) return;
-      links += `<path class="lk ${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""} ${d.suggested ? "sug" : ""}" d="${curve(pos[p.hub], p)}" stroke="${d.suggested ? NO_SUGGEST.color : col(d.status)}"/>`;
+      links += `<path class="lk ${live(d.status) && d.transport !== "zigbee" ? "live" : ""} ${d.kind === "new" || d.transport === "zigbee" ? "dashed" : ""} ${d.suggested ? "sug" : ""}" d="${curve(pos[p.hub], p)}" stroke="${d.suggested ? NO_SUGGEST.color : d.transport === "zigbee" ? "#a78bfa" : col(d.status)}"/>`;
     });
 
     const iconFO = (p, r, icon, color) =>
@@ -360,7 +364,7 @@ class NetOrbitCard extends HTMLElement {
       const isNew = h.kind === "newhub";
       const isGroup = h.kind === "group";
       const r = isRoot ? 32 : isGroup ? 19 : 25;
-      const c = col(isNew ? "new" : h.status);
+      const c = h.transport === "zigbee" ? "#a78bfa" : col(isNew ? "new" : h.status);
       let sub = isNew
         ? `${devices.filter((d) => d.kind === "new").length} waiting`
         : isGroup ? `${h.count} devices`
@@ -414,7 +418,7 @@ class NetOrbitCard extends HTMLElement {
     devices.forEach((d) => {
       const p = pos[d.key];
       if (!p) return;
-      const c = d.suggested ? NO_SUGGEST.color : col(d.status);
+      const c = d.suggested ? NO_SUGGEST.color : d.transport === "zigbee" ? "#a78bfa" : col(d.status);
       const deg = (p.a * 180) / Math.PI;
       const nd = ((deg % 360) + 360) % 360;
       const flip = nd > 90 && nd < 270;
@@ -531,7 +535,8 @@ class NetOrbitCard extends HTMLElement {
     <div class="tip"></div>
   </div>
   ${cfg.show_legend ? `<div class="legend">
-    <span>Moving line = answering pings</span>
+    <span>Moving line = answering IP pings</span>
+    <span><i class="dot" style="background:#a78bfa"></i>Dashed purple = Zigbee mesh (not IP)</span>
     <span><i class="dot" style="background:${NO_STATUS.recent.color}"></i>Seen in the last ${noEsc(staleH)} h</span>
     <span><i class="dot" style="background:${NO_STATUS.stale.color}"></i>Not seen for ${noEsc(staleH)} h+</span>
     <span><i class="dot" style="background:#a78bfa"></i>Allowed to sleep</span>
@@ -656,6 +661,7 @@ class NetOrbitCard extends HTMLElement {
     return `<b>${noEsc(n.label)}</b>` +
       (n.suggested ? `<div style="color:${NO_SUGGEST.light}">Might be a ${noEsc((n.suggested.type || "hub").replace("_", " "))}: ${noEsc((n.suggested.reasons || []).join(", "))}</div>` : "") +
       `<div><span class="k">Status</span><span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · sleeps" : ""}</div>` +
+      (n.transport === "zigbee" ? `<div><span class="k">Network</span>Zigbee${n.zigbee_role ? ` · ${noEsc(NO_ZIGBEE_ROLE[n.zigbee_role] || n.zigbee_role)}` : ""}</div>` : "") +
       (n.ip ? `<div><span class="k">IP</span>${noEsc(n.ip)}</div>` : "") +
       (n.mac ? `<div><span class="k">MAC</span>${noEsc(n.mac)}</div>` : "") +
       (n.vendor ? `<div><span class="k">Maker</span>${noEsc(n.vendor)}</div>` : "") +
