@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3
+
+### Fixed
+- On Home Assistant 2026.10 and older, the card could fail to load: the card picker showed a tile that spun forever, and a NetOrbit card said "Custom element doesn't exist". The card script sometimes loaded a moment before Home Assistant was ready and got lost. It now registers itself again once Home Assistant is ready.
+
+### Changed
+- When setup finishes, NetOrbit tells you the one remaining step: add the NetOrbit card to a dashboard. The README has a new "Add the map to a dashboard" section, including a full-screen Panel view.
+
 ## 0.2.2
 
 ### Security
