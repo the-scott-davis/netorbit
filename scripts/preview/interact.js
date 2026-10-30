@@ -93,6 +93,33 @@ const assert = require("node:assert");
   await c2.locator(`.node[data-key="${tv}"] circle.disc`).tap();
   assert.ok(await c2.locator(".pop select.hub").isVisible(), "tap opens the menu on a phone");
   console.log("phone tap ok, popup width", (await c2.locator(".pop").boundingBox()).width, "screen 390");
+  // 8b. A flick: press, one move partway, release on the hub with no move there.
+  {
+    const fl = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    await fl.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await fl.waitForFunction(() => window.ready);
+    const c4 = fl.locator("netorbit-card");
+    await c4.locator(".editbtn").click();
+    const bb = async (sel) => { const r = await c4.locator(sel).first().boundingBox(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
+    const lamp = await fl.evaluate(() => Object.values(window.NETORBIT_SCENARIOS.novice).find((s) => s.attributes.label === "Lamp").attributes.node_key);
+    const f = await bb(`.node[data-key="${lamp}"] circle.disc`), t2 = await bb('.node[data-key="hub:m1"] circle.disc');
+    await fl.mouse.move(f.x, f.y); await fl.mouse.down();
+    await fl.mouse.move(f.x + (t2.x - f.x) * 0.2, f.y + (t2.y - f.y) * 0.2);
+    await fl.evaluate(([x, y]) => {
+      const card = document.querySelector("netorbit-card");
+      const el = card.shadowRoot.querySelector(".node.dev.draggable");
+      // Release straight over the hub, as a fast flick or some touch screens do.
+      card.shadowRoot.querySelectorAll(".node").forEach(() => {});
+      const target = card._drag && card.shadowRoot.querySelector(`.node[data-key="${CSS.escape(card._drag.n.key)}"]`);
+      (target || el).dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: x, clientY: y, pointerId: card._drag ? card._drag.id : 1 }));
+    }, [t2.x, t2.y]);
+    await fl.mouse.up();
+    const c = await fl.evaluate(() => window.calls);
+    assert.ok(c.length && c.at(-1)[1] === "assign_device" && c.at(-1)[2].hub === "m1", "flick release lands on the hub");
+    console.log("flick drop ok");
+    await fl.close();
+  }
+
   // 9. Drag still lands on a narrower card (tablets, side panels).
   for (const w of [760, 600]) {
     const nar = await browser.newPage({ viewport: { width: w, height: 1000 } });

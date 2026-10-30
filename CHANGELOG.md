@@ -3,6 +3,8 @@
 ## 0.2.1
 
 ### Fixed
+- Drag and drop now judges the drop where you let go, so a quick flick onto a hub works.
+- Google and Nest devices get an icon that exists (one was blank).
 - Hub labels no longer overlap each other on busy maps.
 - After an update, browsers load the new card right away instead of a cached copy.
 - Uses the current Home Assistant field for a device's integration (the old one is deprecated and logged a warning on 2026.10).

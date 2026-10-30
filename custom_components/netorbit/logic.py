@@ -88,7 +88,7 @@ _VENDOR_ICONS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("sony interactive", "nintendo", "valve"), "mdi:gamepad-variant"),
     (("meta platforms", "oculus"), "mdi:virtual-reality"),
     (("ecobee", "honeywell", "resideo", "tado"), "mdi:thermostat"),
-    (("nest labs", "google"), "mdi:google-home"),
+    (("nest labs", "google"), "mdi:home-automation"),
     (("amazon",), "mdi:speaker-message"),
     (("espressif", "tuya", "shelly", "allterco", "sonoff", "itead", "particle", "raspberry pi"), "mdi:chip"),
     (("chamberlain", "liftmaster", "meross"), "mdi:garage"),

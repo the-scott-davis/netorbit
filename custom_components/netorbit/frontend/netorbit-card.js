@@ -615,6 +615,12 @@ class NetOrbitCard extends HTMLElement {
         const d = this._drag;
         if (!d || d.id !== ev.pointerId) return;
         this._drag = null;
+        // Judge the drop where the pointer was released. A quick flick can end on a hub
+        // without a pointermove there.
+        if (ev.type === "pointerup" && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) >= 6) {
+          d.moved = true;
+          d.target = nearestHub(toSvg(ev));
+        }
         ghost.setAttribute("cx", -500); ghost.setAttribute("cy", -500);
         this.shadowRoot.querySelectorAll(".node.hub.hot").forEach((x) => x.classList.remove("hot"));
         if (d.moved) {
