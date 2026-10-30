@@ -80,6 +80,43 @@ def guess_icon(name: str | None, default: str = "mdi:lan-connect") -> str:
     return default
 
 
+# When the name says nothing, the maker often does. Only makers whose products are
+# mostly one kind of thing; Wi-Fi chip makers (Realtek, AzureWave...) say nothing useful.
+_VENDOR_ICONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("sonos", "bose", "denon", "yamaha", "harman", "bang & olufsen", "devialet"), "mdi:speaker"),
+    (("roku", "vizio", "tcl", "hisense"), "mdi:television"),
+    (("sony interactive", "nintendo", "valve"), "mdi:gamepad-variant"),
+    (("meta platforms", "oculus"), "mdi:virtual-reality"),
+    (("ecobee", "honeywell", "resideo", "tado"), "mdi:thermostat"),
+    (("nest labs", "google"), "mdi:google-home"),
+    (("amazon",), "mdi:speaker-message"),
+    (("espressif", "tuya", "shelly", "allterco", "sonoff", "itead", "particle", "raspberry pi"), "mdi:chip"),
+    (("chamberlain", "liftmaster", "meross"), "mdi:garage"),
+    (("tesla",), "mdi:car-electric"),
+    (("signify", "philips lighting", "lifx", "lutron", "nanoleaf", "wiz "), "mdi:lightbulb"),
+    (("ring ", "ring llc", "arlo", "wyze", "reolink", "hikvision", "dahua", "eufy", "anker", "axis comm", "ubiquiti camera"), "mdi:cctv"),
+    (("hewlett packard", "hp inc", "brother", "seiko epson", "canon", "xerox", "lexmark", "kyocera"), "mdi:printer"),
+    (("synology", "qnap", "western digital", "asustor", "terramaster"), "mdi:nas"),
+    (("apple",), "mdi:cellphone-link"),
+    (("peloton",), "mdi:bike"),
+    (("control4", "savant", "crestron", "hubitat", "smartthings", "home assistant", "nabu casa"), "mdi:home-automation"),
+    (("whisker", "litter-robot", "petsafe", "sure petcare"), "mdi:cat"),
+    (("samsung", "lg electronics"), "mdi:television"),
+)
+
+
+def guess_icon_from(name: str | None, vendor: str | None, default: str = "mdi:lan-connect") -> str:
+    """Icon from the name first, then from the maker."""
+    icon = guess_icon(name, default="")
+    if icon:
+        return icon
+    low = f" {(vendor or '').lower()} "
+    for words, vicon in _VENDOR_ICONS:
+        if any(w in low for w in words):
+            return vicon
+    return default
+
+
 def short_hostname(name: str | None) -> str | None:
     """Strip the domain from a reverse DNS name and ignore names that are just an IP."""
     if not name:

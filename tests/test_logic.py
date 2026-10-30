@@ -131,3 +131,14 @@ def test_label_helps_hub_detection():
     # The hostname still wins over the label when both say something.
     both = classify(Evidence(vendor="Ubiquiti", hostname="usw-lite-8", label="Hallway AP"))
     assert both.hub_type == "switch"
+
+
+def test_icon_from_vendor_when_name_says_nothing():
+    from custom_components.netorbit.logic import guess_icon_from
+
+    assert guess_icon_from("Living Room TV", "Apple, Inc.") == "mdi:television"  # name wins
+    assert guess_icon_from("Apple 28:54", "Apple, Inc.") == "mdi:cellphone-link"
+    assert guess_icon_from("Sonos 28:F1", "Sonos, Inc.") == "mdi:speaker"
+    assert guess_icon_from("Device 12:34", "ecobee inc") == "mdi:thermostat"
+    assert guess_icon_from("Device 12:34", "Realtek Semiconductor") == "mdi:lan-connect"
+    assert guess_icon_from("Device 12:34", None) == "mdi:lan-connect"

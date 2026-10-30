@@ -67,6 +67,7 @@ from .logic import (
     compute_status,
     fallback_name,
     guess_icon,
+    guess_icon_from,
     is_random_mac,
     normalize_mac,
     parse_proc_arp,
@@ -743,7 +744,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     hub, placement = ROOT_HUB_ID, PLACE_NONE
             nodes[key] = Node(
                 key=key, kind="device", name=name, ip=ip, mac=rec.get("mac") or cfg.get("mac"),
-                icon=cfg.get("icon") or guess_icon(f"{name} {rec.get('hostname') or ''}"),
+                icon=cfg.get("icon") or guess_icon_from(f"{name} {rec.get('hostname') or ''}", rec.get("vendor")),
                 link=hub, sleepy=bool(cfg.get("sleepy", False)),
                 status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
