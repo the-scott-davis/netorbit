@@ -13,6 +13,9 @@ const NO_STATUS = {
 };
 
 // Possible hubs get a color of their own, so they never look like "seen recently".
+// Icon name -> SVG path data, shared by every card on the page (see _resolveIcons).
+const NO_ICON_PATHS = new Map();
+const NO_ICON_PENDING = new Set();
 const NO_SUGGEST = { color: "#f472b6", light: "#f9a8d4", soft: "rgba(244,114,182,.5)" };
 
 const NO_HUB_TYPE = {
@@ -346,8 +349,15 @@ class NetOrbitCard extends HTMLElement {
       links += `<path class="lk ${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""} ${d.suggested ? "sug" : ""}" d="${curve(pos[p.hub], p)}" stroke="${d.suggested ? NO_SUGGEST.color : col(d.status)}"/>`;
     });
 
-    const iconFO = (p, r, icon, color) =>
-      `<foreignObject x="${(p.x - r).toFixed(1)}" y="${(p.y - r).toFixed(1)}" width="${2 * r}" height="${2 * r}" pointer-events="none"><div xmlns="http://www.w3.org/1999/xhtml" class="ic" style="width:${2 * r}px;height:${2 * r}px;color:${color};--mdc-icon-size:${Math.round(r * 1.05)}px"><ha-icon icon="${noEsc(icon)}"></ha-icon></div></foreignObject>`;
+    // Icons are drawn as SVG paths, not <ha-icon> in a <foreignObject>: WebKit (Safari, the iOS/iPadOS companion
+    // app) ignores the SVG's viewBox scaling for positioned elements inside a foreignObject, and ha-svg-icon is
+    // position:relative, so every icon was drawn away from its circle. The path data comes from hidden <ha-icon>
+    // elements outside the SVG (_resolveIcons).
+    const iconFO = (p, r, icon, color) => {
+      const size = r * 1.05;
+      const d = NO_ICON_PATHS.get(icon);
+      return `<g class="ic" data-icon="${noEsc(icon)}" transform="translate(${(p.x - size / 2).toFixed(1)} ${(p.y - size / 2).toFixed(1)}) scale(${(size / 24).toFixed(4)})" fill="${color}" pointer-events="none"><path d="${d ? noEsc(d) : ""}"/></g>`;
+    };
 
     let gfx = "";
     let labels = "";
@@ -473,7 +483,6 @@ class NetOrbitCard extends HTMLElement {
   .pin { fill:#60a5fa; stroke:#0f172a; stroke-width:1.5; }
   .pulse { animation: pulse 1.8s ease-in-out infinite; }
   @keyframes pulse { 50% { stroke-width:5; } }
-  .ic { display:flex; align-items:center; justify-content:center; }
   .hlab { fill:#f1f5f9; font-size:15px; font-weight:600; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }
   .hlab.glab { fill:#cbd5e1; font-size:13px; font-weight:500; }
   .hsub { fill:#94a3b8; font-size:12px; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }
@@ -543,6 +552,52 @@ class NetOrbitCard extends HTMLElement {
     const btn = this.shadowRoot.querySelector(".editbtn");
     if (btn) btn.addEventListener("click", () => { this._edit = !this._edit; this._sig = ""; this.hass = this._hass; });
     this._wire(model);
+    this._resolveIcons();
+  }
+
+  // Fill in the path of every map icon not resolved yet: render it once in a hidden <ha-icon>, read the path that
+  // ha-svg-icon draws, cache it for the page (NO_ICON_PATHS) and copy it into the map.
+  _resolveIcons() {
+    const svg = this.shadowRoot.querySelector("svg.map");
+    if (!svg) return;
+    const fill = (name, d) => svg.querySelectorAll("g.ic").forEach((g) => {
+      if (g.dataset.icon === name) g.firstElementChild.setAttribute("d", d);
+    });
+    const missing = [...new Set([...svg.querySelectorAll("g.ic")].map((g) => g.dataset.icon))].filter((n) => !NO_ICON_PATHS.has(n));
+    if (!missing.length) return;
+    let box = this.shadowRoot.querySelector(".iconsrc");
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "iconsrc";
+      box.setAttribute("aria-hidden", "true");
+      box.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden";
+      this.shadowRoot.appendChild(box);
+    }
+    missing.forEach((name) => {
+      if (NO_ICON_PENDING.has(name)) return;
+      NO_ICON_PENDING.add(name);
+      const el = document.createElement("ha-icon");
+      el.setAttribute("icon", name);
+      box.appendChild(el);
+      let tries = 0;
+      const poll = () => {
+        const inner = el.shadowRoot && el.shadowRoot.querySelector("ha-svg-icon");
+        const path = inner && inner.shadowRoot && inner.shadowRoot.querySelector("path");
+        const d = path && path.getAttribute("d");
+        if (d) {
+          NO_ICON_PATHS.set(name, d);
+          NO_ICON_PENDING.delete(name);
+          el.remove();
+          this.shadowRoot.querySelector("svg.map") && fill(name, d);
+        } else if (++tries < 50) {
+          setTimeout(poll, 100);
+        } else {
+          NO_ICON_PENDING.delete(name);
+          el.remove();
+        }
+      };
+      poll();
+    });
   }
 
   _wire(model) {
