@@ -54,6 +54,14 @@ Every release is run against hundreds of generated home networks (see [the netwo
 
 Big networks fold quiet devices into "+N more" bubbles (tap one to see the list), while devices that need attention and possible hubs always stay on the map. In the DHCP shot the router reshuffled addresses three times; every name, icon and placement followed its MAC address, and hovering a device whose IP changed shows the reservation tip.
 
+## Placing devices by hand
+
+Whatever NetOrbit can't work out, you can fix in about a minute. Full guide, including turning on SNMP so you barely have to: **[docs/SETUP.md](docs/SETUP.md)**.
+
+| Drag a device onto its hub | Confirm a possible hub | On a phone |
+| --- | --- | --- |
+| ![](docs/howto-drag.gif) | ![](docs/howto-confirm-hub.gif) | ![](docs/howto-phone-move.gif) |
+
 ## What your network can tell NetOrbit
 
 | Your setup | Hubs found | Devices placed under the right hub |
@@ -62,6 +70,8 @@ Big networks fold quiet devices into "+N more" bubbles (tap one to see the list)
 | Managed switches with SNMP on | Automatically | Automatically (wired and wireless, through the switch port) |
 | Netgear/Orbi with the Netgear integration | Suggested | Automatically, once you enable its "connected AP" sensors |
 | eero, Google/Nest Wifi, Deco, Velop, ISP routers | Suggested | By you: drag and drop, paste a list, or an AI assistant |
+
+How to turn each of these on, step by step: [docs/SETUP.md](docs/SETUP.md).
 
 Placement you choose always wins over automatic placement. Each device shows how it was placed, and *Automatic* hands it back to NetOrbit.
 
@@ -146,6 +156,7 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 
 - If your switches still use the factory read-only community, there's nothing to do.
 - If you changed it (good idea), enter it under **Settings > SNMP community**. Letters and numbers only work best; some switches silently ignore communities with symbols.
+- Where to turn SNMP on for UniFi, Omada and other switches, and which switches don't have it: [docs/SETUP.md](docs/SETUP.md#2-turn-on-snmp-on-managed-switches).
 - Consumer routers and mesh systems don't support SNMP. That's normal.
 
 ## Card options

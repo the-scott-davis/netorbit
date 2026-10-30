@@ -503,7 +503,7 @@ class NetOrbitCard extends HTMLElement {
   </div>
   ${edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename or remove it.</div>` : ""}
   <div class="wrap">
-    <svg viewBox="-70 -40 1140 1090" role="img" aria-label="Network map">
+    <svg class="map" viewBox="-70 -40 1140 1090" role="img" aria-label="Network map">
       <defs><filter id="noblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>
       <circle class="ring" cx="${C.x}" cy="${C.y}" r="370"/>
       ${links}
@@ -536,7 +536,7 @@ class NetOrbitCard extends HTMLElement {
     const col = (s) => (s === "group" ? "#64748b" : (NO_STATUS[s] || NO_STATUS.unknown).color);
     const tip = this.shadowRoot.querySelector(".tip");
     const wrap = this.shadowRoot.querySelector(".wrap");
-    const svg = this.shadowRoot.querySelector("svg");
+    const svg = this.shadowRoot.querySelector("svg.map");
     const ghost = this.shadowRoot.querySelector(".ghost");
     const place = (el, ev, w, h) => {
       const r = wrap.getBoundingClientRect();

@@ -86,6 +86,8 @@ PING_TIMEOUT = 1.5
 SWEEP_TIMEOUT = 1.0
 DNS_TIMEOUT = 2.0
 DNS_REFRESH = timedelta(hours=12)
+# Bump when the way names are looked up changes, so existing installs look again right away.
+NAME_LOOKUP_VERSION = 2
 AUTO_PLACEMENT_TTL = timedelta(days=7)
 SNMP_CONCURRENCY = 32
 
@@ -416,7 +418,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             checked = rec.get("dns_checked")
             if not ip:
                 continue
-            if checked and now - datetime.fromisoformat(checked) < DNS_REFRESH:
+            fresh = rec.get("dns_version") == NAME_LOOKUP_VERSION
+            if fresh and checked and now - datetime.fromisoformat(checked) < DNS_REFRESH:
                 continue
             todo.append((key, ip))
         sem = asyncio.Semaphore(16)
@@ -435,6 +438,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     host = mdns_label(await mdns_name(ip))
                 rec = self._seen[key]
                 rec["dns_checked"] = now.isoformat()
+                rec["dns_version"] = NAME_LOOKUP_VERSION
                 if host:
                     rec["hostname"] = host
 

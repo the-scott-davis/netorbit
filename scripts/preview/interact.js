@@ -93,6 +93,22 @@ const assert = require("node:assert");
   await c2.locator(`.node[data-key="${tv}"] circle.disc`).tap();
   assert.ok(await c2.locator(".pop select.hub").isVisible(), "tap opens the menu on a phone");
   console.log("phone tap ok, popup width", (await c2.locator(".pop").boundingBox()).width, "screen 390");
+  // 9. Drag still lands on a narrower card (tablets, side panels).
+  for (const w of [760, 600]) {
+    const nar = await browser.newPage({ viewport: { width: w, height: 1000 } });
+    await nar.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await nar.waitForFunction(() => window.ready);
+    const c3 = nar.locator("netorbit-card");
+    await c3.locator(".editbtn").click();
+    const bb = async (sel) => { const r = await c3.locator(sel).first().boundingBox(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
+    const f = await bb(`.node[data-key="${plug}"] circle.disc`), t2 = await bb('.node[data-key="hub:m1"] circle.disc');
+    await nar.mouse.move(f.x, f.y); await nar.mouse.down();
+    await nar.mouse.move(t2.x, t2.y, { steps: 12 }); await nar.mouse.up();
+    const c = await nar.evaluate(() => window.calls);
+    assert.ok(c.length && c.at(-1)[1] === "assign_device" && c.at(-1)[2].hub === "m1", `drag works at ${w}px`);
+    console.log(`narrow drag ok at ${w}px`);
+    await nar.close();
+  }
   await browser.close();
   console.log("ALL INTERACTIONS PASSED");
 })().catch((e) => { console.error(e); process.exit(1); });

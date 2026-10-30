@@ -282,3 +282,21 @@ async def test_names_from_other_integrations(hass: HomeAssistant, fake_net) -> N
     names = set(_node_states(hass))
     assert {"Pool", "Hall Thermostat", "NAS", "Alexs MacBook"} <= names
     assert not any(":" in n and n.count(":") >= 5 for n in names)
+
+
+async def test_old_installs_look_names_up_again(hass: HomeAssistant, fake_net) -> None:
+    """A device checked recently by an older version gets looked up again by the new one."""
+    fake_net.alive = {GATEWAY, "192.0.2.12"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.12": MAC_C}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    assert "Device 53:0C" in _node_states(hass)
+
+    # Now the device would answer Bonjour, but its record looks like an older version
+    # checked it a moment ago (no lookup version stored).
+    fake_net.mdns["192.0.2.12"] = "Office-Mac.local."
+    for rec in entry.runtime_data._seen.values():
+        rec.pop("dns_version", None)
+    await hass.services.async_call(DOMAIN, "scan_now", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert "Office Mac" in _node_states(hass)

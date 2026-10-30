@@ -36,8 +36,43 @@
   card.setConfig({ title: "Home Network" });
   document.getElementById("c").appendChild(card);
   window.calls = [];
-  card.hass = { states: window.NETORBIT_SCENARIOS[s], entities: {}, user: { is_admin: true },
-    callService: async (d, svc, data) => { window.calls.push([d, svc, data]); } };
+  // ?live=1 applies each action to the fake data, so the map changes the way it would in Home Assistant.
+  const live = new URLSearchParams(location.search).get("live") === "1";
+  const states = window.NETORBIT_SCENARIOS[s];
+  const summaryId = Object.keys(states).find((k) => states[k].attributes.kind === "summary");
+  const slug = (x) => String(x).toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  const findDev = (ref) => Object.values(states).find((st) => st.attributes.kind === "device" &&
+    [st.attributes.mac, st.attributes.ip, st.attributes.label, st.attributes.node_key].some((v) => v && String(v).toLowerCase() === String(ref).toLowerCase()));
+  const apply = (svc, data) => {
+    const sum = states[summaryId].attributes;
+    if (svc === "assign_device") {
+      [].concat(data.device).forEach((ref) => { const st = findDev(ref); if (st) Object.assign(st.attributes, { link: "hub:" + data.hub, placement: "manual" }); });
+    } else if (svc === "reset_placement") {
+      [].concat(data.device).forEach((ref) => { const st = findDev(ref); if (st) Object.assign(st.attributes, { link: "hub:gateway", placement: "none" }); });
+    } else if (svc === "confirm_hub") {
+      const sug = (sum.suggested_hubs || []).find((x) => x.key === data.device);
+      const dev = sug ? null : findDev(data.device);
+      const label = (sug && sug.name) || (dev && dev.attributes.label) || "Hub";
+      const id = slug(label);
+      if (dev) delete states[dev.entity_id];
+      states["sensor.netorbit_" + id] = { entity_id: "sensor.netorbit_" + id, state: "online", attributes: {
+        netorbit: true, kind: "hub", label, node_key: "hub:" + id, link: "hub:gateway", hub_type: data.type,
+        icon: { switch: "mdi:switch", access_point: "mdi:access-point", mesh_node: "mdi:access-point-network" }[data.type] || "mdi:access-point",
+        ip: (sug || dev.attributes).ip, mac: (sug || dev.attributes).mac, last_seen: new Date().toISOString(), hub_source: "manual" } };
+      sum.suggested_hubs = (sum.suggested_hubs || []).filter((x) => x !== sug);
+    } else if (svc === "dismiss_hub") {
+      sum.suggested_hubs = (sum.suggested_hubs || []).filter((x) => x.key !== data.device);
+    } else if (svc === "update_hub") {
+      const st = Object.values(states).find((x) => x.attributes.node_key === "hub:" + data.hub);
+      if (st && data.name) st.attributes.label = data.name;
+    }
+  };
+  const hass = { states, entities: {}, user: { is_admin: true },
+    callService: async (d, svc, data) => {
+      window.calls.push([d, svc, data]);
+      if (live) { apply(svc, data); setTimeout(() => { card.hass = Object.assign({}, hass, { states: Object.assign({}, states) }); }, 250); }
+    } };
+  card.hass = hass;
   window.ready = true;
 </script>
 </body>
