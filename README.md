@@ -145,7 +145,7 @@ title: Home Network
 
 **Full screen looks best.** Go to **Settings > Dashboards > Add dashboard** and make one just for the map. Edit its view, set the view type to **Panel (single card)**, and add the NetOrbit card there.
 
-**NetOrbit isn't in the card search?** Do a hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac) so your browser picks up the new card. The integration serves the card itself, so there's no dashboard resource to add, whichever way you installed.
+**NetOrbit isn't in the card search, or the card says "Custom element doesn't exist"?** First make sure you've added the integration under **Settings > Devices & services**. The card only loads once NetOrbit is set up there. Then do a hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac). The integration serves the card itself, so normally there's no dashboard resource to add. If it still won't load on Home Assistant 2026.10 or older, update NetOrbit to 0.2.3 or newer, or add `/netorbit/netorbit-card.js` as a **JavaScript module** under **Settings > Dashboards > three-dot menu > Resources** and remove it again after updating.
 
 Next: tap any device for its details, and use **Edit layout** to place anything NetOrbit couldn't work out. The [setup guide](docs/SETUP.md) covers getting more of it placed for you.
 

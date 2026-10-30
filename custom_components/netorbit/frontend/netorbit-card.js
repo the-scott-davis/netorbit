@@ -796,7 +796,18 @@ class NetOrbitCard extends HTMLElement {
   }
 }
 
-if (!customElements.get("netorbit-card")) customElements.define("netorbit-card", NetOrbitCard);
+// Define the card in whatever registry window.customElements is right now. Home Assistant 2026.10 and older
+// can run this file before the app swaps in its scoped custom element registry, which hides a define made
+// earlier ("Custom element doesn't exist"). Defining again once the app's own <home-assistant> element is
+// defined puts the card in the registry the app actually uses.
+function noDefine() {
+  const reg = window.customElements;
+  if (!reg.get("netorbit-card")) reg.define("netorbit-card", NetOrbitCard);
+}
+noDefine();
+if (window.customElements.whenDefined) {
+  window.customElements.whenDefined("home-assistant").then(noDefine).catch((e) => console.warn("NetOrbit: card define failed", e));
+}
 window.customCards = window.customCards || [];
 if (!window.customCards.find((c) => c.type === "netorbit-card")) {
   window.customCards.push({
