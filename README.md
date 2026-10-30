@@ -108,7 +108,7 @@ NetOrbit needs Home Assistant 2026.2 or newer.
 1. Click the button above, or go to **Settings > Marketplace** and add `https://github.com/the-scott-davis/netorbit` as a custom repository with type **Integration**. Adding a custom repository asks you to connect a GitHub account once.
 2. Download **NetOrbit**. Home Assistant shows a warning that community code runs with full access to your home; read it and confirm.
 3. Set it up when asked, or go to **Settings > Devices & services > Add integration > NetOrbit**. The subnet and router are filled in for you. No restart is needed for a first install.
-4. Refresh your browser once so the card loads.
+4. Refresh your browser once so the card loads, then [add the map to a dashboard](#add-the-map-to-a-dashboard).
 
 Updates show up in **Settings > Updates** like any other. Updating still needs a restart.
 
@@ -119,6 +119,7 @@ Updates show up in **Settings > Updates** like any other. Updating still needs a
 1. In HACS, open the menu, choose **Custom repositories**, add `https://github.com/the-scott-davis/netorbit` with type **Integration**.
 2. Download **NetOrbit** and restart Home Assistant.
 3. Go to **Settings > Devices & services > Add integration > NetOrbit**.
+4. [Add the map to a dashboard](#add-the-map-to-a-dashboard).
 
 HACS on 2026.10 and older shows a blank icon for NetOrbit in its list. That's expected: older HACS only looks up icons on Home Assistant's brand site, which no longer takes new custom integrations. NetOrbit ships its own icon, which Home Assistant shows on the integration's page and the Marketplace shows everywhere.
 
@@ -126,16 +127,27 @@ When you later update to 2026.11, Home Assistant moves NetOrbit into the Marketp
 
 ### Manual
 
-Copy `custom_components/netorbit` into your Home Assistant `config/custom_components` folder and restart. You won't get update notifications this way.
+Copy `custom_components/netorbit` into your Home Assistant `config/custom_components` folder, restart, add the integration under **Settings > Devices & services**, then [add the map to a dashboard](#add-the-map-to-a-dashboard). You won't get update notifications this way.
 
-### Add the card
+## Add the map to a dashboard
+
+Setting up the integration starts tracking your devices (you'll see them as entities), but the map itself is a dashboard card. Add it once:
+
+1. Open a dashboard and click the pencil (**Edit dashboard**) in the top right.
+2. Click **Add card**, search for **NetOrbit**, pick it and save.
+
+Or paste this into a **Manual** card:
 
 ```yaml
 type: custom:netorbit-card
 title: Home Network
 ```
 
-It's also in the card picker as **NetOrbit**. The integration serves the card itself, so there's no dashboard resource to add, whichever way you installed.
+**Full screen looks best.** Go to **Settings > Dashboards > Add dashboard** and make one just for the map. Edit its view, set the view type to **Panel (single card)**, and add the NetOrbit card there.
+
+**NetOrbit isn't in the card search?** Do a hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac) so your browser picks up the new card. The integration serves the card itself, so there's no dashboard resource to add, whichever way you installed.
+
+Next: tap any device for its details, and use **Edit layout** to place anything NetOrbit couldn't work out. The [setup guide](docs/SETUP.md) covers getting more of it placed for you.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 

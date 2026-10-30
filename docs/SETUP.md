@@ -2,6 +2,8 @@
 
 <p><a href="../README.md#netorbit"><img src="nav/hub.svg" width="250" alt="Back to the NetOrbit map"></a></p>
 
+Don't see a map yet? Setting up the integration tracks your devices, and the map is a dashboard card you add once: [Add the map to a dashboard](../README.md#add-the-map-to-a-dashboard).
+
 NetOrbit draws a map the moment you add it. How much of it is right on its own depends on what your network can tell it. This page covers the three things that do most of the work for you, and how to finish the rest by hand in a minute or two.
 
 | You have | What to do | What you get |
