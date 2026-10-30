@@ -12,10 +12,14 @@ const NO_STATUS = {
   unknown: { color: "#64748b", label: "Unknown" },
 };
 
-// Possible hubs get a color of their own, so they never look like "seen recently".
 // Icon name -> SVG path data, shared by every card on the page (see _resolveIcons).
 const NO_ICON_PATHS = new Map();
 const NO_ICON_PENDING = new Set();
+// Cards waiting on icons. Any card can start a lookup, so a finished lookup fills every card, not only the one
+// that asked (a second card, or the card editor's preview, would otherwise keep blank icons).
+const NO_ICON_CARDS = new Set();
+
+// Possible hubs get a color of their own, so they never look like "seen recently".
 const NO_SUGGEST = { color: "#f472b6", light: "#f9a8d4", soft: "rgba(244,114,182,.5)" };
 
 const NO_HUB_TYPE = {
@@ -556,22 +560,22 @@ class NetOrbitCard extends HTMLElement {
   }
 
   // Fill in the path of every map icon not resolved yet: render it once in a hidden <ha-icon>, read the path that
-  // ha-svg-icon draws, cache it for the page (NO_ICON_PATHS) and copy it into the map.
+  // ha-svg-icon draws, cache it for the page (NO_ICON_PATHS) and copy it into every card's map.
   _resolveIcons() {
     const svg = this.shadowRoot.querySelector("svg.map");
     if (!svg) return;
-    const fill = (name, d) => svg.querySelectorAll("g.ic").forEach((g) => {
-      if (g.dataset.icon === name) g.firstElementChild.setAttribute("d", d);
-    });
     const missing = [...new Set([...svg.querySelectorAll("g.ic")].map((g) => g.dataset.icon))].filter((n) => !NO_ICON_PATHS.has(n));
     if (!missing.length) return;
-    let box = this.shadowRoot.querySelector(".iconsrc");
+    NO_ICON_CARDS.add(this);
+    // One hidden box for the whole page, outside every card: a card redraws its whole shadow root, which would
+    // throw away a lookup still in progress.
+    let box = document.getElementById("netorbit-iconsrc");
     if (!box) {
       box = document.createElement("div");
-      box.className = "iconsrc";
+      box.id = "netorbit-iconsrc";
       box.setAttribute("aria-hidden", "true");
       box.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden";
-      this.shadowRoot.appendChild(box);
+      document.body.appendChild(box);
     }
     missing.forEach((name) => {
       if (NO_ICON_PENDING.has(name)) return;
@@ -588,7 +592,13 @@ class NetOrbitCard extends HTMLElement {
           NO_ICON_PATHS.set(name, d);
           NO_ICON_PENDING.delete(name);
           el.remove();
-          this.shadowRoot.querySelector("svg.map") && fill(name, d);
+          NO_ICON_CARDS.forEach((card) => {
+            const map = card.isConnected && card.shadowRoot && card.shadowRoot.querySelector("svg.map");
+            if (!map) { NO_ICON_CARDS.delete(card); return; }
+            map.querySelectorAll("g.ic").forEach((g) => {
+              if (g.dataset.icon === name) g.firstElementChild.setAttribute("d", d);
+            });
+          });
         } else if (++tries < 50) {
           setTimeout(poll, 100);
         } else {

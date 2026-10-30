@@ -6,23 +6,9 @@
 <meta charset="utf-8">
 <title>NetOrbit preview</title>
 <style>body { margin:0; background:#111318; padding:24px; max-width:960px; }</style>
-<script>
-  // Stand-ins for Home Assistant's elements. Icons come from @mdi/js when available.
-  window.MDI = {};
-  customElements.define("ha-icon", class extends HTMLElement {
-    connectedCallback() {
-      const name = this.getAttribute("icon") || "";
-      const key = "mdi" + name.slice(4).split("-").map((p) => p[0].toUpperCase() + p.slice(1)).join("");
-      const path = window.MDI[key] || "";
-      this.innerHTML = `<svg viewBox="0 0 24 24" style="width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);display:block;fill:currentColor"><path d="${path}"/></svg>`;
-      this.style.display = "inline-flex";
-    }
-  });
-  customElements.define("ha-card", class extends HTMLElement {
-    connectedCallback() { this.style.display = "block"; this.style.borderRadius = "12px"; }
-  });
-</script>
+<script>window.MDI = {};</script>
 <script src="scenarios.js"></script>
+<script src="ha-stubs.js"></script>
 <script src="../../custom_components/netorbit/frontend/netorbit-card.js"></script>
 </head>
 <body>
