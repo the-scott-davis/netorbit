@@ -136,6 +136,42 @@ const assert = require("node:assert");
     console.log(`narrow drag ok at ${w}px`);
     await nar.close();
   }
+  // 10. Drop on a suggested hub (pink ring): asks to make it a hub, then confirms it and moves the device in one call.
+  //     A drop on empty space moves nothing.
+  {
+    const sp = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    sp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await sp.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await sp.waitForFunction(() => window.ready);
+    const c5 = sp.locator("netorbit-card");
+    await c5.locator(".editbtn").click();
+    const bb = async (sel) => { const r = await c5.locator(sel).first().boundingBox(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
+    const sug = await sp.evaluate(() => window.NETORBIT_SCENARIOS.novice["sensor.netorbit_devices_online"].attributes.suggested_hubs[0].key);
+    const f = await bb(`.node[data-key="${plug}"] circle.disc`), t3 = await bb(`.node[data-key="sug:${sug}"] circle.disc`);
+    const before = (await sp.evaluate(() => window.calls)).length;
+
+    // Empty space: far from every hub and suggestion.
+    const box = await c5.locator("svg.map").boundingBox();
+    await sp.mouse.move(f.x, f.y); await sp.mouse.down();
+    await sp.mouse.move(box.x + box.width - 8, box.y + 8, { steps: 10 }); await sp.mouse.up();
+    assert.strictEqual((await sp.evaluate(() => window.calls)).length, before, "a drop on empty space moves nothing");
+
+    await sp.mouse.move(f.x, f.y); await sp.mouse.down();
+    await sp.mouse.move(t3.x, t3.y, { steps: 10 });
+    assert.ok(await c5.locator(`.node.hot[data-key="sug:${sug}"]`).count(), "suggested hub highlights while dragging");
+    await sp.mouse.up();
+    assert.ok(await c5.locator(".pop .yes").isVisible(), "drop on a suggestion asks first");
+    assert.strictEqual((await sp.evaluate(() => window.calls)).length, before, "nothing changes until confirmed");
+    await c5.locator(".pop .yes").click();
+    const c = await sp.evaluate(() => window.calls);
+    const last = c.at(-1);
+    assert.strictEqual(last[1], "confirm_hub");
+    assert.strictEqual(last[2].device, sug);
+    assert.ok(Array.isArray(last[2].assign) && last[2].assign.length === 1, "the dragged device is moved under the new hub");
+    console.log("drop on suggestion ok:", JSON.stringify(last[2]));
+    await sp.close();
+  }
+
   await browser.close();
   console.log("ALL INTERACTIONS PASSED");
 })().catch((e) => { console.error(e); process.exit(1); });
