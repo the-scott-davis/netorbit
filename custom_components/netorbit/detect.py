@@ -49,6 +49,7 @@ class Evidence:
     snmp_bridge: bool = False  # answers the BRIDGE-MIB (keeps a MAC table)
     snmp_descr: str | None = None
     ssdp_types: list[str] = field(default_factory=list)
+    label: str | None = None  # a name the user already gave it elsewhere in Home Assistant (ping, device tracker)
 
 
 @dataclass
@@ -113,10 +114,15 @@ def classify(ev: Evidence) -> Verdict:
             reasons.append(f"listed as {reg_kind.replace('_', ' ')} by the {ev.registry_domain} integration")
             kind = kind or reg_kind
 
-    host_kind = _kind_from_text(ev.hostname or "")
+    # The network hostname, or failing that a name the user gave it elsewhere in Home Assistant.
+    name_text = ev.hostname or ""
+    host_kind = _kind_from_text(name_text)
+    if not host_kind and ev.label:
+        name_text = ev.label
+        host_kind = _kind_from_text(name_text)
     if host_kind:
         # "ap-3", "eap2" or "deco-office" are strong hints. "switch" is weak: people name light switches that way.
-        weak = host_kind == HUB_SWITCH and not _SWITCH_MODEL_RE.search((ev.hostname or "").lower())
+        weak = host_kind == HUB_SWITCH and not _SWITCH_MODEL_RE.search(name_text.lower())
         score += 1 if weak else 2
         reasons.append(f"its name looks like a{'n' if host_kind == HUB_AP else ''} {host_kind.replace('_', ' ')}")
         kind = kind or host_kind

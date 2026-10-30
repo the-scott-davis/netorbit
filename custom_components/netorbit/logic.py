@@ -96,6 +96,37 @@ def short_hostname(name: str | None) -> str | None:
     return host
 
 
+_MAC_IN_TEXT = re.compile(r"([0-9a-f]{2}[:-]){5}[0-9a-f]{2}|(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])", re.I)
+_PING_PREFIX = re.compile(r"^\s*ping\s*[:\-]?\s+", re.I)
+
+
+def useful_name(name: str | None) -> str | None:
+    """A name a person would recognize, or None for names that are just an address.
+
+    Integrations often name devices after their MAC or IP ("00:00:5e:00:53:1e",
+    "00:00:5e:00:53:1e Speaker 53:1E", "192.0.2.20"). Those are worse than nothing.
+    """
+    if not name:
+        return None
+    name = " ".join(str(name).split())
+    if not name or _MAC_IN_TEXT.search(name):
+        return None
+    try:
+        ipaddress.ip_address(name)
+        return None
+    except ValueError:
+        pass
+    return name
+
+
+def ping_label(name: str | None) -> str | None:
+    """'Ping Hallway AP' -> 'Hallway AP'. People often prefix ping sensors with the word."""
+    name = useful_name(name)
+    if not name:
+        return None
+    return useful_name(_PING_PREFIX.sub("", name)) or None
+
+
 def fallback_name(mac: str | None, ip: str | None) -> str:
     """Name for a device we know nothing about."""
     if mac:

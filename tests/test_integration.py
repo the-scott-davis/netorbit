@@ -246,3 +246,36 @@ async def test_unload(hass: HomeAssistant, fake_net) -> None:
     await _setup(hass, entry)
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_names_from_other_integrations(hass: HomeAssistant, fake_net) -> None:
+    """Real names win over MAC-named duplicates; device trackers and ping sensors fill the gaps."""
+    from homeassistant.helpers import device_registry as dr
+
+    fake_net.alive = {GATEWAY, "192.0.2.10", "192.0.2.11", "192.0.2.12"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.10": MAC_A, "192.0.2.11": MAC_B, "192.0.2.12": MAC_C}
+    MAC_D, MAC_E = "00:00:5e:00:53:0d", "00:00:5e:00:53:0e"
+    fake_net.alive |= {"192.0.2.13", "192.0.2.14"}
+    fake_net.arp.update({"192.0.2.13": MAC_D, "192.0.2.14": MAC_E})
+
+    dev_reg = dr.async_get(hass)
+    # The same speaker under two integrations: one named after its MAC, one with a real name.
+    for title, name in (("Renderer", MAC_E), ("Speaker", "Pool")):
+        other = MockConfigEntry(domain="test", title=title)
+        other.add_to_hass(hass)
+        dev_reg.async_get_or_create(
+            config_entry_id=other.entry_id, connections={(dr.CONNECTION_NETWORK_MAC, MAC_E)}, name=name
+        )
+    # A device tracker that knows MAC_B by name, and one named after its MAC (useless).
+    hass.states.async_set("device_tracker.thermostat", "home", {"mac": MAC_B, "friendly_name": "Hall Thermostat"})
+    hass.states.async_set("device_tracker.x", "home", {"mac": MAC_C, "friendly_name": f"{MAC_C} Acme 53:0C"})
+    # A ping sensor the user set up by hand for 192.0.2.13.
+    ping = MockConfigEntry(domain="ping", title="192.0.2.13", data={}, options={"host": "192.0.2.13"})
+    ping.add_to_hass(hass)
+    er.async_get(hass).async_get_or_create("binary_sensor", "ping", "p13", config_entry=ping, suggested_object_id="ping_nas")
+    hass.states.async_set("binary_sensor.ping_nas", "on", {"friendly_name": "Ping NAS"})
+
+    await _setup(hass, _entry("auto"))
+    names = set(_node_states(hass))
+    assert {"Pool", "Hall Thermostat", "NAS", "Device 53:0C"} <= names
+    assert not any(":" in n and n.count(":") >= 5 for n in names)

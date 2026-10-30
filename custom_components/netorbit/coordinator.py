@@ -74,7 +74,7 @@ from .logic import (
     subnet_hosts,
 )
 from .snmp import SnmpClient
-from .sources import client_access_points, registry_by_mac, ssdp_types_by_ip
+from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
 from .topology import Topology, infer, macs_close
 
 _LOGGER = logging.getLogger(__name__)
@@ -181,6 +181,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._controller_ap: dict[str, str] = {}
         self._suggestions: list[dict[str, Any]] = []
         self._registry: dict[str, Any] = {}
+        self._tracker_names: dict[str, str] = {}
+        self._ping_names: dict[str, str] = {}
         self.internal_update = False
 
     # ----- lifecycle -------------------------------------------------------
@@ -304,6 +306,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             await self._lookup_vendors()
             await self._resolve_names(now)
             self._registry = registry_by_mac(self.hass)
+            self._tracker_names = tracker_names_by_mac(self.hass)
+            self._ping_names = ping_names_by_ip(self.hass)
             if self.opts[CONF_SNMP_ENABLED]:
                 await self._snmp_probe(now, replied | set(arp))
             await self._detect_hubs()
@@ -543,6 +547,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 registry_model=reg.model if reg else None, registry_name=reg.name if reg else None,
                 registry_domain=reg.domain if reg else None, snmp_bridge=bool(snmp.get("bridge")),
                 snmp_descr=snmp.get("descr"), ssdp_types=ssdp.get(rec.get("ip") or "", []),
+                label=self._tracker_names.get(mac) or self._ping_names.get(rec.get("ip") or ""),
             )
             verdict = classify(ev)
             if mac in controller_aps:
@@ -579,6 +584,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         reg = self._registry.get(mac)
         if reg and reg.name:
             return reg.name
+        if self._tracker_names.get(mac):
+            return self._tracker_names[mac]
+        if rec.get("ip") and self._ping_names.get(rec["ip"]):
+            return self._ping_names[rec["ip"]]
         snmp_name = (rec.get("snmp") or {}).get("name")
         if snmp_name:
             return snmp_name
@@ -670,9 +679,13 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     def _discovered_name(self, key: str, rec: dict[str, Any]) -> str:
         mac = rec.get("mac")
         if mac:
-            dev = dr.async_get(self.hass).async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac)})
-            if dev and (dev.name_by_user or dev.name):
-                return dev.name_by_user or dev.name
+            reg = self._registry.get(mac)
+            if reg and reg.name:
+                return reg.name
+            if self._tracker_names.get(mac):
+                return self._tracker_names[mac]
+        if rec.get("ip") and self._ping_names.get(rec["ip"]):
+            return self._ping_names[rec["ip"]]
         if rec.get("hostname"):
             return rec["hostname"]
         vendor = rec.get("vendor")

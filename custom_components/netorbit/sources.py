@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .detect import NETWORK_DOMAINS
-from .logic import normalize_mac
+from .logic import normalize_mac, ping_label, useful_name
 
 
 @dataclass
@@ -39,12 +39,55 @@ def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
             if entry and domain is None and entry.domain != "netorbit":
                 domain = entry.domain
         info = RegistryInfo(
-            name=dev.name_by_user or dev.name, model=dev.model, manufacturer=dev.manufacturer, domain=domain
+            name=useful_name(dev.name_by_user) or useful_name(dev.name),
+            model=dev.model, manufacturer=dev.manufacturer, domain=domain,
         )
         for mac in macs:
-            # Prefer entries from network integrations when a MAC appears twice.
-            if mac not in out or (domain in NETWORK_DOMAINS and out[mac].domain not in NETWORK_DOMAINS):
+            old = out.get(mac)
+            if old is None:
                 out[mac] = info
+                continue
+            # The same MAC often shows up under several integrations (a speaker and its
+            # media renderer, say). Prefer network integrations, then a real name.
+            if domain in NETWORK_DOMAINS and old.domain not in NETWORK_DOMAINS:
+                out[mac] = RegistryInfo(info.name or old.name, info.model or old.model,
+                                        info.manufacturer or old.manufacturer, domain)
+            elif old.name is None and info.name:
+                out[mac] = RegistryInfo(info.name, old.model or info.model,
+                                        old.manufacturer or info.manufacturer, old.domain)
+    return out
+
+
+def tracker_names_by_mac(hass: HomeAssistant) -> dict[str, str]:
+    """{mac: name} from device trackers (nmap, router integrations) that report a MAC."""
+    out: dict[str, str] = {}
+    for state in hass.states.async_all("device_tracker"):
+        mac = normalize_mac(state.attributes.get("mac"))
+        if not mac:
+            continue
+        name = useful_name(state.attributes.get("friendly_name")) or useful_name(state.attributes.get("host_name"))
+        if name:
+            out.setdefault(mac, name)
+    return out
+
+
+def ping_names_by_ip(hass: HomeAssistant) -> dict[str, str]:
+    """{ip: name} from Home Assistant's Ping integration, which many people already set up by hand."""
+    out: dict[str, str] = {}
+    ent_reg = er.async_get(hass)
+    for entry in hass.config_entries.async_entries("ping"):
+        host = (entry.data or {}).get("host") or (entry.options or {}).get("host")
+        if not host:
+            continue
+        name = None
+        for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+            state = hass.states.get(ent.entity_id)
+            name = ping_label(state.attributes.get("friendly_name") if state else None) or ping_label(ent.name)
+            if name:
+                break
+        name = name or ping_label(entry.title)
+        if name:
+            out.setdefault(str(host), name)
     return out
 
 

@@ -99,3 +99,35 @@ def test_validate_subnet():
 def test_slug():
     assert slugify_id("Hallway AP #2") == "hallway_ap_2"
     assert slugify_id("!!!") == "item"
+
+
+def test_useful_name_skips_addresses():
+    from custom_components.netorbit.logic import ping_label, useful_name
+
+    assert useful_name("Pool") == "Pool"
+    assert useful_name("  Living   Room ") == "Living Room"
+    assert useful_name("00:00:5e:00:53:1e") is None
+    assert useful_name("00:00:5e:00:53:1e Speaker 53:1E") is None
+    assert useful_name("controller_ea1_00005E005342") is None
+    assert useful_name("192.0.2.20") is None
+    assert useful_name("") is None and useful_name(None) is None
+    assert useful_name("Office Printer 2") == "Office Printer 2"
+    assert ping_label("Ping Hallway AP") == "Hallway AP"
+    assert ping_label("ping: NAS") == "NAS"
+    assert ping_label("Pinger box") == "Pinger box"
+    assert ping_label("192.0.2.9") is None
+
+
+def test_label_helps_hub_detection():
+    from custom_components.netorbit.detect import Evidence, classify
+
+    sw = classify(Evidence(vendor="SnapAV", label="Office Switch 16"))
+    assert sw.auto and sw.hub_type == "switch"
+    ap = classify(Evidence(vendor="SnapAV", label="Hallway AP"))
+    assert ap.auto and ap.hub_type == "access_point"
+    # A user's name for a light switch is not network gear.
+    light = classify(Evidence(vendor="Espressif Inc.", label="Hallway Light Switch"))
+    assert not light.suggest and not light.auto
+    # The hostname still wins over the label when both say something.
+    both = classify(Evidence(vendor="Ubiquiti", hostname="usw-lite-8", label="Hallway AP"))
+    assert both.hub_type == "switch"
