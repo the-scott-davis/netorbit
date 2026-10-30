@@ -26,6 +26,9 @@
     },
     "abort": {
       "already_configured": "This subnet is already set up."
+    },
+    "create_entry": {
+      "default": "NetOrbit is now finding the devices on your network. **One more step to see the map:** open a dashboard, click the pencil (Edit dashboard), choose **Add card**, search for **NetOrbit**, and save.\n\nFor a full-screen map, make a dashboard just for it and set its view type to **Panel (single card)**. If NetOrbit isn't in the card search, refresh your browser.\n\n[Step-by-step guide](https://github.com/the-scott-davis/netorbit#add-the-map-to-a-dashboard)"
     }
   },
   "options": {
