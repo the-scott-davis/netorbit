@@ -68,8 +68,12 @@ class FakeNet:
 @pytest.fixture
 def fake_net():
     net = FakeNet()
+
+    async def multiping(*args, **kwargs):  # looked up per call, so a test can swap net.multiping
+        return await net.multiping(*args, **kwargs)
+
     with (
-        patch("icmplib.async_multiping", side_effect=net.multiping),
+        patch("icmplib.async_multiping", side_effect=multiping),
         patch("icmplib.async_ping", side_effect=net.ping),
         patch("custom_components.netorbit.coordinator._read_arp", side_effect=lambda: dict(net.arp)),
         patch("custom_components.netorbit.coordinator._reverse_dns", side_effect=lambda ip: net.dns.get(ip)),

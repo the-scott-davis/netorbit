@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6
+
+### Changed
+- Moving a device is instant. After a drag (or Move to), the device is drawn under its new hub right away with a spinning blue "saving" ring until Home Assistant confirms. Before, nothing happened on screen for a second or two.
+- Any change from the card, a service or an AI assistant redraws the map straight away from what NetOrbit already knows, and checks the network afterwards in the background. Before, every change waited for a full ping round, which takes a couple of seconds when some devices don't answer.
+
 ## 0.2.5
 
 ### Changed

@@ -175,6 +175,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._last_sweep: datetime | None = None
         self._last_snmp_probe: datetime | None = None
         self._prev_status: dict[str, str] = {}
+        self._alive_keys: set[str] = set()  # keys that answered the last ping round
         self._force_sweep = False
         self._force_probe = False
         self._privileged: bool | None = None
@@ -256,9 +257,22 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 rec["ip"] = ip
         self._controller_ap = client_access_points(self.hass)
         self._save()
-        data = self._build(now, {k for k, _ in alive})
+        self._alive_keys = {k for k, _ in alive}
+        data = self._build(now, self._alive_keys)
         self._fire_transitions(data)
         return data
+
+    @callback
+    def async_rebuild(self) -> None:
+        """Redraw the map from what NetOrbit already knows, without pinging.
+
+        Used after a settings change (moving a device, adding a hub) so the map updates at once.
+        A full ping round can take a couple of seconds when some devices don't answer.
+        """
+        if self.data is None:
+            return
+        data = self._build(dt_util.utcnow(), self._alive_keys)
+        self.async_set_updated_data(data)
 
     async def _sweep(self, now: datetime) -> None:
         """Ping every address, read ARP, then work out hubs and layout."""
