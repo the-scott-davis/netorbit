@@ -47,6 +47,18 @@ def test_unknown_device_left_alone():
     assert "ghost" not in topo.device_hub
 
 
+def test_device_seen_only_toward_the_router_sits_on_the_router():
+    """Wired into the router itself: every switch only sees it on the port facing the router."""
+    tables, hubs, devices = _home()
+    pc = "00:00:5e:00:53:20"
+    tables["sw1"][pc] = 1  # SW1's uplink to the router
+    tables["sw2"][pc] = 1  # SW2's uplink (toward SW1, then the router)
+    devices["pc"] = pc
+    topo = infer(tables, hubs, GW, devices, "gateway", leaf_hubs={"ap1", "ap2", "ap3"})
+    assert topo.device_hub["pc"] == "gateway"
+    assert topo.device_hub["nas"] == "sw2"  # everything else unchanged
+
+
 def test_no_tables_means_no_opinion():
     topo = infer({}, {"gateway": GW}, GW, {"tv": TV}, "gateway")
     assert topo.device_hub == {} and topo.hub_parent == {}

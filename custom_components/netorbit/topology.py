@@ -117,6 +117,10 @@ def infer(
             continue
         loc = locate(mac)
         if not loc:
+            # Seen only on ports that face the router: it's plugged into the router (or into
+            # something unmanaged hanging off it), or on the router's own Wi-Fi.
+            if any(uplink[sw] is not None and tables[sw].get(mac) == uplink[sw] for sw in tables):
+                result.device_hub[key] = root
             continue
         hubs_here = by_port.get(loc, [])
         result.device_hub[key] = hubs_here[0] if len(hubs_here) == 1 else loc[0]

@@ -146,6 +146,41 @@ async def test_manual_beats_automatic_and_reset(hass: HomeAssistant, fake_net) -
     assert tv.attributes["link"] == "hub:u6_lite_hall" and tv.attributes["placement"] == "snmp"
 
 
+async def test_new_hub_takes_its_port_at_once(hass: HomeAssistant, fake_net) -> None:
+    """Making a device a hub places the devices behind its switch port straight away, from the
+    tables already read, without waiting for the next sweep. A device the switches only see
+    toward the router sits on the router."""
+    _network(fake_net)
+    plug, pc = "00:00:5e:00:53:30", "00:00:5e:00:53:31"  # example-ok: synthetic test value
+    fake_net.alive |= {"192.0.2.30", "192.0.2.31"}
+    fake_net.arp.update({"192.0.2.30": plug, "192.0.2.31": pc})
+    fake_net.tables["192.0.2.2"].update({plug: 4, pc: 1})  # plug shares port 4 with MAYBE; pc only on the uplink
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+
+    by_mac = {s.attributes.get("mac", "").lower(): s for s in _node_states(hass).values()}
+    assert by_mac[pc].attributes["link"] == "hub:gateway" and by_mac[pc].attributes["placement"] == "snmp"
+    assert by_mac[plug].attributes["link"] == "hub:core_switch"
+
+    swept = []
+    real = fake_net.multiping
+
+    async def counting(addresses, **kwargs):
+        if len(addresses) > 20:  # a subnet sweep, not the tracked-device ping round
+            swept.append(1)
+        return await real(addresses, **kwargs)
+
+    fake_net.multiping = counting
+    res = await hass.services.async_call(
+        DOMAIN, "confirm_hub", {"device": MAYBE_MAC, "type": "access_point", "name": "Attic AP"}, blocking=True, return_response=True
+    )
+    by_mac = {s.attributes.get("mac", "").lower(): s for s in _node_states(hass).values()}
+    assert by_mac[plug].attributes["link"] == f"hub:{res['hub']}"
+    assert swept == []
+
+
 async def test_moving_a_device_does_not_wait_for_pings(hass: HomeAssistant, fake_net) -> None:
     """A placement change redraws the map from what NetOrbit knows; the ping round runs afterwards."""
     import asyncio

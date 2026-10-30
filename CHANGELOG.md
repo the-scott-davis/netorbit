@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+### Fixed
+- Making a device a hub (or removing a hub) places the devices behind it straight away. Before, the map waited for the next network scan, up to 5 minutes. NetOrbit now works the layout out again from the switch tables it already has.
+- With SNMP, a device the switches only ever see on the port facing the router (plugged into the router itself, into an unmanaged switch on it, or on the router's own Wi-Fi) is placed under the router. Before, it stayed unplaced.
+
 ## 0.2.6
 
 ### Changed

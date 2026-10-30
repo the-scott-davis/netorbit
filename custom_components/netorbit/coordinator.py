@@ -266,12 +266,19 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     def async_rebuild(self) -> None:
         """Redraw the map from what NetOrbit already knows, without pinging.
 
-        Used after a settings change (moving a device, adding a hub) so the map updates at once.
+        Used after a settings change (moving a device, adding a hub) so the map updates at once,
+        including devices that a new hub's switch port now places under it.
         A full ping round can take a couple of seconds when some devices don't answer.
         """
         if self.data is None:
             return
-        data = self._build(dt_util.utcnow(), self._alive_keys)
+        now = dt_util.utcnow()
+        if self._tables:
+            # Hubs may have changed (a device made a hub, a hub removed), so work the layout out
+            # again from the switch tables already in memory. No network traffic.
+            self._infer_layout(now)
+            self._save()
+        data = self._build(now, self._alive_keys)
         self.async_set_updated_data(data)
 
     async def _sweep(self, now: datetime) -> None:
