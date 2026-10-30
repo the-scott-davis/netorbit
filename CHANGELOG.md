@@ -2,7 +2,7 @@
 
 ## 0.2.0
 
-First public beta.
+First public release.
 
 ### Added
 - Ready for the Home Assistant Marketplace (2026.11 and newer) as well as HACS: brand icon shipped with the integration, Marketplace categories, install docs for both.
