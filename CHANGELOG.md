@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+### Fixed
+- Hub labels no longer overlap each other on busy maps.
+- After an update, browsers load the new card right away instead of a cached copy.
+- Uses the current Home Assistant field for a device's integration (the old one is deprecated and logged a warning on 2026.10).
+
 ## 0.2.0
 
 First public release.
