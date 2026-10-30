@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4
+
+### Fixed
+- Map icons on Safari and in the iOS/iPadOS companion app sat away from their circles, like a second ring of loose icons. Icons are now drawn as part of the map itself, so every browser puts them in the same place.
+
+Thanks to @mgeorgieff for tracking this down and fixing it in #2.
+
 ## 0.2.3
 
 ### Fixed
