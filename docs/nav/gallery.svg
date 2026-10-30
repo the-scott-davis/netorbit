@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="250" height="96" viewBox="0 0 250 96">
+<style>.l{font:600 16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#e2e8f0}.s{font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#94a3b8}</style>
+<rect width="250" height="96" rx="14" fill="#0b1220"/>
+<line x1="198" y1="40" x2="0" y2="96" stroke="#c084fc" stroke-opacity=".55" stroke-width="2" stroke-dasharray="5 6"/>
+<circle cx="198" cy="40" r="27" fill="#c084fc" fill-opacity=".14"/>
+<circle cx="198" cy="40" r="20" fill="#0f1a2e" stroke="#c084fc" stroke-width="2.5"/>
+<g transform="translate(186 28)"><path d="M21,17H7V3H21M21,1H7A2,2 0 0,0 5,3V17A2,2 0 0,0 7,19H21A2,2 0 0,0 23,17V3A2,2 0 0,0 21,1M3,5H1V21A2,2 0 0,0 3,23H19V21H3M15.96,10.29L13.21,13.83L11.25,11.47L8.5,15H19.5L15.96,10.29Z" fill="#c084fc"/></g>
+<text x="166" y="37" text-anchor="end" class="l">See it</text><text x="166" y="55" text-anchor="end" class="s">hundreds of networks</text>
+</svg>

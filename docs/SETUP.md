@@ -1,5 +1,7 @@
 # Getting the most automatic map
 
+<p><a href="../README.md#netorbit"><img src="nav/hub.svg" width="250" alt="Back to the NetOrbit map"></a></p>
+
 NetOrbit draws a map the moment you add it. How much of it is right on its own depends on what your network can tell it. This page covers the three things that do most of the work for you, and how to finish the rest by hand in a minute or two.
 
 | You have | What to do | What you get |
@@ -51,7 +53,9 @@ Open the switch's web page and look for **SNMP** (often under Management, System
 
 Settings > Devices & services > NetOrbit > **Configure > Settings**, and enter the community under **SNMP community**. If you left it as the factory "public", there's nothing to enter.
 
-NetOrbit asks each device on your network once an hour whether it speaks SNMP, and reads switch tables every few minutes. It's a tiny amount of traffic.
+NetOrbit asks devices once an hour whether they speak SNMP, and reads switch tables every few minutes. It's a tiny amount of traffic.
+
+**Who gets your community.** SNMP v2c sends the community unencrypted, so NetOrbit only sends yours to hubs, suggested hubs, and gear from makers that only build network equipment (UniFi, eero, Aruba, MikroTik and so on). Everything else is only asked with the factory "public". If your switch is from a maker that also sells plugs and cameras (TP-Link, Netgear) and NetOrbit doesn't spot it, add it as a hub under **Configure > Add a hub** with its IP, and NetOrbit will start reading it.
 
 **Tips**
 
@@ -84,3 +88,5 @@ Whatever NetOrbit couldn't work out, you can place yourself. Three ways, use whi
 NetOrbit names devices from, in order: Home Assistant's own device list, router and controller integrations, Ping sensors you've set up, your router's local DNS, and the name a device announces over Bonjour. When none of those know a device, it shows the maker (for example "Apple 28:54").
 
 To rename one, open its sensor in Home Assistant and change the name, or use **Configure > Track / edit a device**. Names stick to the device's MAC address, so they survive IP changes.
+
+<p align="right"><sub><a href="../README.md#netorbit">back to the map</a></sub></p>

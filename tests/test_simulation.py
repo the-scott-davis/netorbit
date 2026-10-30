@@ -223,7 +223,21 @@ def _check(hass: HomeAssistant, entry, net: Network, *, snmp_ok: bool, label: st
 
 
 def _has_tables(net: Network) -> bool:
-    return any(n.snmp_community for n in net.nodes.values())
+    """True when at least one switch NetOrbit is allowed to ask is there to be read.
+
+    A custom community is only sent to likely network gear (a network maker, or a name that
+    gives it away). A switch from a mixed maker with no telling name and a custom community
+    is deliberately never asked; the user adds it as a hub by hand.
+    """
+    from custom_components.netorbit.detect import NETWORK_VENDORS, _kind_from_text
+
+    def askable(n) -> bool:
+        if n.snmp_community == "public":
+            return True
+        vendor = (n.vendor or "").lower()
+        return any(v in vendor for v in NETWORK_VENDORS) or bool(n.hostname and _kind_from_text(n.hostname))
+
+    return any(n.snmp_community and askable(n) for n in net.nodes.values())
 
 
 def _same_port(net: Network, a: str, b: str) -> bool:

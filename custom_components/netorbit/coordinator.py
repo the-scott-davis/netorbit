@@ -62,7 +62,7 @@ from .const import (
     STATUS_STALE,
     STORAGE_VERSION,
 )
-from .detect import Evidence, classify, pretty_vendor
+from .detect import NETWORK_VENDORS, Evidence, classify, pretty_vendor
 from .logic import (
     compute_status,
     fallback_name,
@@ -184,6 +184,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._topology = Topology()
         self._controller_ap: dict[str, str] = {}
         self._suggestions: list[dict[str, Any]] = []
+        self._community_asked: set[str] = set()  # IPs already asked with the custom SNMP community
         self._registry: dict[str, Any] = {}
         self._tracker_names: dict[str, str] = {}
         self._ping_names: dict[str, str] = {}
@@ -315,6 +316,13 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if self.opts[CONF_SNMP_ENABLED]:
                 await self._snmp_probe(now, replied | set(arp))
             await self._detect_hubs()
+            if self.opts[CONF_SNMP_ENABLED] and self.opts.get(CONF_SNMP_COMMUNITY):
+                # Gear that detection just suggested may only answer to the custom community.
+                # Ask it now, then look again, so it doesn't wait for the next sweep.
+                before = set(self._community_asked)
+                await self._snmp_probe(now, replied | set(arp))
+                if self._community_asked != before:
+                    await self._detect_hubs()
             # Read tables after detection so switches found in this sweep count straight away.
             self._tables = await self._read_tables() if self.opts[CONF_SNMP_ENABLED] else {}
             self._infer_layout(now)
@@ -453,6 +461,16 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             out.append(SNMP_DEFAULT_COMMUNITY)
         return out
 
+    def _community_hosts(self, hub_ips: set[str]) -> set[str]:
+        """IPs allowed to receive a custom SNMP community: hubs, suggested hubs, and network-gear makers."""
+        out = {ip for ip in hub_ips if ip}
+        out |= {s.get("ip") for s in self._suggestions if s.get("ip")}
+        for rec in self._seen.values():
+            vendor = (rec.get("vendor") or "").lower()
+            if rec.get("ip") and any(v in vendor for v in NETWORK_VENDORS):
+                out.add(rec["ip"])
+        return out
+
     async def _snmp_probe(self, now: datetime, live_ips: set[str]) -> None:
         """Hourly: ask every live host whether it speaks SNMP and keeps a MAC table."""
         probe_due = (
@@ -462,24 +480,34 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         )
         by_ip = {rec.get("ip"): key for key, rec in self._seen.items() if rec.get("ip")}
         hub_hosts = {h.get("host"): f"hub:{h['id']}" for h in self.opts[CONF_HUBS] if h.get("host")}
-        if probe_due:
-            self._force_probe = False
-            self._last_snmp_probe = now
+        trusted = self._community_hosts(set(hub_hosts))
+        # Devices that just became hubs or suggestions are asked with the custom community on the
+        # next sweep instead of waiting an hour.
+        fresh = (trusted - self._community_asked) & (live_ips | set(hub_hosts)) if self.opts.get(CONF_SNMP_COMMUNITY) else set()
+        if probe_due or fresh:
+            targets = sorted(live_ips | set(hub_hosts)) if probe_due else sorted(fresh)
+            if probe_due:
+                self._force_probe = False
+                self._last_snmp_probe = now
             sem = asyncio.Semaphore(SNMP_CONCURRENCY)
 
             async def probe(ip: str) -> None:
                 async with sem:
-                    for i, comm in enumerate(self._communities()):
+                    # SNMP v2c sends the community in clear text. Your own community only goes to
+                    # hubs and likely network gear; everything else is only asked with the factory default.
+                    comms = self._communities() if ip in trusted else [SNMP_DEFAULT_COMMUNITY]
+                    for i, comm in enumerate(comms):
                         res = await self._snmp.probe(ip, comm)
                         if res:
                             for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
                                 rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
-                                rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "community": "custom" if (i == 0 and self.opts.get(CONF_SNMP_COMMUNITY)) else "default"}
+                                rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "community": "custom" if (comm != SNMP_DEFAULT_COMMUNITY) else "default"}
                             return
                     for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
                         self._seen.get(key, {}).pop("snmp", None)
 
-            await asyncio.gather(*(probe(ip) for ip in sorted(live_ips | set(hub_hosts))))
+            await asyncio.gather(*(probe(ip) for ip in targets))
+            self._community_asked |= {ip for ip in targets if ip in trusted}
 
     async def _read_tables(self) -> dict[str, dict[str, int]]:
         """Read MAC tables from every hub that is a bridge."""

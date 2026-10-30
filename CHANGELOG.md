@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2
+
+### Security
+- AI assistant tools that change the map now require a Home Assistant admin. Reading the map is still open to the assistant. Voice satellites and other callers with no user can't make changes.
+- The assistant prompt tells the model to treat device names as data and never act on instructions inside them, since any device can pick its own name.
+- Your custom SNMP community is only sent to hubs, suggested hubs and network-gear makers, not to every device on the network. SNMP v2c sends it unencrypted. Gear suggested during a scan is asked in the same scan.
+
+Thanks to @ninchistudios for the review in #1.
+
 ## 0.2.1
 
 ### Fixed

@@ -6,6 +6,18 @@ A live, radial map of your home network for Home Assistant. Every device orbits 
 
 Install it, click Submit, and NetOrbit draws the best map your network can tell it about. Then fix anything it couldn't work out by dragging devices around, pasting a client list, or asking an AI assistant to do it for you.
 
+<p align="center">
+<a href="#install"><img src="docs/nav/install.svg" width="250" alt="Install"></a>
+<a href="#what-it-does"><img src="docs/nav/features.svg" width="250" alt="What it does"></a>
+<a href="#tested-on-simulated-networks"><img src="docs/nav/gallery.svg" width="250" alt="See it"></a><br>
+<a href="#placing-devices-by-hand"><img src="docs/nav/place.svg" width="250" alt="Place devices"></a>
+<a href="#netorbit"><img src="docs/nav/hub.svg" width="250" alt="NetOrbit"></a>
+<a href="docs/SETUP.md"><img src="docs/nav/setup.svg" width="250" alt="Setup guide"></a><br>
+<a href="#settings"><img src="docs/nav/settings.svg" width="250" alt="Settings"></a>
+<a href="#entities-events-and-services"><img src="docs/nav/services.svg" width="250" alt="Automations"></a>
+<a href="#requirements-and-limits"><img src="docs/nav/limits.svg" width="250" alt="Limits and privacy"></a>
+</p>
+
 ![NetOrbit card](docs/full.png)
 
 ## What it does
@@ -32,6 +44,8 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
 | --- |
 | ![](docs/edit.png) |
 
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
+
 ## Tested on simulated networks
 
 Every release is run against hundreds of generated home networks (see [the network simulator](#the-network-simulator)). These are a few of them, drawn by the real card from the real integration's output.
@@ -54,6 +68,8 @@ Every release is run against hundreds of generated home networks (see [the netwo
 
 Big networks fold quiet devices into "+N more" bubbles (tap one to see the list), while devices that need attention and possible hubs always stay on the map. In the DHCP shot the router reshuffled addresses three times; every name, icon and placement followed its MAC address, and hovering a device whose IP changed shows the reservation tip.
 
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
+
 ## Placing devices by hand
 
 Whatever NetOrbit can't work out, you can fix in about a minute. Full guide, including turning on SNMP so you barely have to: **[docs/SETUP.md](docs/SETUP.md)**.
@@ -61,6 +77,8 @@ Whatever NetOrbit can't work out, you can fix in about a minute. Full guide, inc
 | Drag a device onto its hub | Confirm a possible hub | On a phone |
 | --- | --- | --- |
 | ![](docs/howto-drag.gif) | ![](docs/howto-confirm-hub.gif) | ![](docs/howto-phone-move.gif) |
+
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## What your network can tell NetOrbit
 
@@ -74,6 +92,8 @@ Whatever NetOrbit can't work out, you can fix in about a minute. Full guide, inc
 How to turn each of these on, step by step: [docs/SETUP.md](docs/SETUP.md).
 
 Placement you choose always wins over automatic placement. Each device shows how it was placed, and *Automatic* hands it back to NetOrbit.
+
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Install
 
@@ -117,6 +137,8 @@ title: Home Network
 
 It's also in the card picker as **NetOrbit**. The integration serves the card itself, so there's no dashboard resource to add, whichever way you installed.
 
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
+
 ## Settings
 
 Under the integration's **Configure** menu:
@@ -152,12 +174,14 @@ Tips for the tidiest map:
 
 ### SNMP
 
-SNMP is how managed switches share their MAC address tables. NetOrbit only ever reads (it never changes anything), and it asks each device on your network once an hour whether it speaks SNMP.
+SNMP is how managed switches share their MAC address tables. NetOrbit only ever reads (it never changes anything). Once an hour it asks devices whether they speak SNMP using the factory "public" community. Your own community is only sent to hubs, suggested hubs and gear from network makers, because SNMP v2c sends it unencrypted and any device that receives it could read it.
 
 - If your switches still use the factory read-only community, there's nothing to do.
 - If you changed it (good idea), enter it under **Settings > SNMP community**. Letters and numbers only work best; some switches silently ignore communities with symbols.
 - Where to turn SNMP on for UniFi, Omada and other switches, and which switches don't have it: [docs/SETUP.md](docs/SETUP.md#2-turn-on-snmp-on-managed-switches).
 - Consumer routers and mesh systems don't support SNMP. That's normal.
+
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Card options
 
@@ -173,6 +197,8 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 
 Hover a device for details, tap it for its history. Admins get an **Edit layout** button.
+
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Entities, events and services
 
@@ -210,6 +236,8 @@ Every service returns a response describing what it did. Devices can be given by
 
 Import either from **Settings > Automations & scenes > Blueprints > Import blueprint** using the file's GitHub URL. The Marketplace and HACS install the integration only, so blueprints are always imported this way.
 
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
+
 ## Requirements and limits
 
 - Home Assistant needs to be on the same network as your devices, with host networking. Home Assistant OS and supervised installs are. Docker installs need `network_mode: host`.
@@ -218,6 +246,8 @@ Import either from **Settings > Automations & scenes > Blueprints > Import bluep
 - If an access point and wired devices share one switch port through an unmanaged switch, the switch can't tell them apart, so those wired devices may be drawn under the access point. Move them by hand if it matters to you.
 - Placements from pasted lists are a snapshot. TVs, cameras and smart home gear stay put, so that's fine for them.
 - IPv4 only, up to 1024 hosts per entry. Add one entry per subnet if you have several.
+
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Privacy
 
@@ -229,6 +259,8 @@ NetOrbit runs entirely on your network and never contacts anything outside it. M
 - ARP based presence for devices that block ping.
 - A visual card editor.
 
+<p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
+
 ## Contributing
 
 ```bash
@@ -238,6 +270,8 @@ pytest
 node --test tests/card.test.js
 python scripts/check_examples.py
 ```
+
+The section map at the top of this page is drawn by `python scripts/docs/nav.py` (it needs the `mdi.js` file described below).
 
 Examples, tests and docs only use the address ranges reserved for documentation (`192.0.2.x`, `00:00:5e:00:53:xx`), never values from a real network. `scripts/check_examples.py` enforces that, and CI runs it on every push.
 

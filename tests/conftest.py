@@ -38,10 +38,12 @@ class FakeNet:
         self.snmp: dict[str, tuple[str, object]] = {}
         self.tables: dict[str, dict[str, int]] = {}
         self.dns: dict[str, str] = {}
+        self.probed: list[tuple[str, str]] = []  # every (ip, community) NetOrbit asked
         self.mdns: dict[str, str] = {}  # ip -> Bonjour name, e.g. "Office-iMac.local"
         self.vendors: dict[str, str] = {}  # "AA:BB:CC" -> vendor name
 
     async def snmp_probe(self, _client, ip, community):
+        self.probed.append((ip, community))
         entry = self.snmp.get(ip)
         if entry and entry[0] == community:
             return entry[1]

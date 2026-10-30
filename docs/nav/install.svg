@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="250" height="96" viewBox="0 0 250 96">
+<style>.l{font:600 16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#e2e8f0}.s{font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#94a3b8}</style>
+<rect width="250" height="96" rx="14" fill="#0b1220"/>
+<line x1="52" y1="40" x2="250" y2="96" stroke="#34d399" stroke-opacity=".55" stroke-width="2" stroke-dasharray="5 6"/>
+<circle cx="52" cy="40" r="27" fill="#34d399" fill-opacity=".14"/>
+<circle cx="52" cy="40" r="20" fill="#0f1a2e" stroke="#34d399" stroke-width="2.5"/>
+<g transform="translate(40 28)"><path d="M8 17V15H16V17H8M16 10L12 14L8 10H10.5V6H13.5V10H16M12 2C17.5 2 22 6.5 22 12C22 17.5 17.5 22 12 22C6.5 22 2 17.5 2 12C2 6.5 6.5 2 12 2M12 4C7.58 4 4 7.58 4 12C4 16.42 7.58 20 12 20C16.42 20 20 16.42 20 12C20 7.58 16.42 4 12 4Z" fill="#34d399"/></g>
+<text x="84" y="37" text-anchor="start" class="l">Install</text><text x="84" y="55" text-anchor="start" class="s">Marketplace or HACS</text>
+</svg>
