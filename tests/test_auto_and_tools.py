@@ -146,6 +146,35 @@ async def test_manual_beats_automatic_and_reset(hass: HomeAssistant, fake_net) -
     assert tv.attributes["link"] == "hub:u6_lite_hall" and tv.attributes["placement"] == "snmp"
 
 
+async def test_moving_a_device_does_not_wait_for_pings(hass: HomeAssistant, fake_net) -> None:
+    """A placement change redraws the map from what NetOrbit knows; the ping round runs afterwards."""
+    import asyncio
+
+    _network(fake_net)
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await entry.runtime_data.async_refresh()
+
+    gate = asyncio.Event()
+    real = fake_net.multiping
+
+    async def slow(addresses, **kwargs):
+        await gate.wait()  # a ping round that won't finish until we say so
+        return await real(addresses, **kwargs)
+
+    fake_net.multiping = slow
+    await asyncio.wait_for(
+        hass.services.async_call(DOMAIN, "assign_device", {"device": ["living-room-tv"], "hub": "Router"}, blocking=True),
+        timeout=2,
+    )
+    tv = _node_states(hass)["living-room-tv"]
+    assert tv.attributes["link"] == "hub:gateway" and tv.attributes["placement"] == "manual"
+    assert tv.state == "online"  # status carried over from the last ping round
+    gate.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert _node_states(hass)["living-room-tv"].attributes["link"] == "hub:gateway"
+
+
 async def test_import_client_list(hass: HomeAssistant, fake_net) -> None:
     fake_net.alive = {GATEWAY, "192.0.2.10", "192.0.2.12"}
     fake_net.arp = {"192.0.2.10": TV_MAC, "192.0.2.12": NAS_MAC}

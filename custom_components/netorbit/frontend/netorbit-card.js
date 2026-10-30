@@ -2,7 +2,7 @@
  * Draws a live radial map from the NetOrbit integration's sensors.
  * https://github.com/the-scott-davis/netorbit  (MIT)
  */
-const NETORBIT_VERSION = "0.2.5";
+const NETORBIT_VERSION = "0.2.6";
 
 const NO_STATUS = {
   online: { color: "#34d399", label: "Online" },
@@ -241,7 +241,14 @@ class NetOrbitCard extends HTMLElement {
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
         status: NO_STATUS[s.state] ? s.state : "unknown",
       };
-      sig.push([n.key, n.status, n.link, n.label, icon, n.sleepy ? 1 : 0, n.placement].join("~"));
+      // A device just dropped on a hub is drawn there right away, with a "saving" ring, until
+      // Home Assistant reports the new placement (or 10 s pass and the old one stands).
+      const opt = this._optimistic && this._optimistic.get(n.key);
+      if (opt) {
+        if (n.link === opt.link || Date.now() - opt.t > 10000) this._optimistic.delete(n.key);
+        else { n.link = n.parent = opt.link; n.placement = "manual"; n.pending = true; }
+      }
+      sig.push([n.key, n.status, n.link, n.label, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0].join("~"));
       if (a.kind === "hub") {
         hubs[n.key] = n;
         if (!n.link && !root) root = n.key;
@@ -435,7 +442,8 @@ class NetOrbitCard extends HTMLElement {
       const tr = p.r + 24;
       const tx = C.x + tr * Math.cos(p.a), ty = C.y + tr * Math.sin(p.a);
       const rot = flip ? deg + 180 : deg;
-      gfx += `<g class="node dev ${d.status} ${d.sleepy ? "sleepy" : ""} ${edit && d.kind === "device" ? "draggable" : ""}" data-key="${noEsc(d.key)}">` +
+      gfx += `<g class="node dev ${d.status} ${d.sleepy ? "sleepy" : ""} ${d.pending ? "pending" : ""} ${edit && d.kind === "device" ? "draggable" : ""}" data-key="${noEsc(d.key)}">` +
+        (d.pending ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="pendring"/>` : "") +
         (live(d.status) ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="halo" fill="${c}"/>` : "") +
         (d.suggested ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="sugring"/>` : "") +
         `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15" class="disc ${d.status === "stale" ? "pulse" : ""} ${d.kind === "new" ? "dashed" : ""}" stroke="${c}"/>` +
@@ -501,6 +509,7 @@ class NetOrbitCard extends HTMLElement {
   .node:hover .disc { stroke-width:4; }
   .node:hover .dlab { fill:#fff; font-weight:600; }
   .node.hot .disc { stroke:#60a5fa !important; stroke-width:6; }
+  .pendring { fill:none; stroke:#60a5fa; stroke-width:2.5; stroke-dasharray:10 8; animation: spin 1.2s linear infinite; transform-box:fill-box; transform-origin:center; }
   .ghost { fill:rgba(96,165,250,.25); stroke:#60a5fa; stroke-width:2; pointer-events:none; }
   .tip { position:absolute; pointer-events:none; background:rgba(15,23,42,.96); border:1px solid rgba(148,163,184,.25); border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.55; color:#e2e8f0; min-width:190px; max-width:280px; box-shadow:0 10px 30px rgba(0,0,0,.45); opacity:0; transition:opacity .12s; z-index:2; }
   .tiptip { margin-top:6px; padding-top:6px; border-top:1px solid rgba(148,163,184,.2); color:#93c5fd; }
@@ -698,7 +707,7 @@ class NetOrbitCard extends HTMLElement {
         this.shadowRoot.querySelectorAll(".node.hot").forEach((x) => x.classList.remove("hot"));
         if (d.moved) {
           if (d.target && d.target.suggested) this._dropOnSuggestPopup(d.target, d.n, ev, wrap, place);
-          else if (d.target && d.target.key !== d.n.link) this._call("assign_device", { device: [this._ref(d.n)], hub: d.target.key.replace(/^hub:/, "") });
+          else if (d.target && d.target.key !== d.n.link) this._moveTo(d.n, d.target.key);
           else this._sig = "";
           return;
         }
@@ -751,6 +760,19 @@ class NetOrbitCard extends HTMLElement {
     return "";
   }
 
+  // Move a device to a hub: draw it there straight away, then tell Home Assistant.
+  _moveTo(n, hubKey) {
+    if (!this._optimistic) this._optimistic = new Map();
+    this._optimistic.set(n.key, { link: hubKey, t: Date.now() });
+    const redraw = () => { this._sig = ""; if (this._hass) this.hass = this._hass; };
+    this._call("assign_device", { device: [this._ref(n)], hub: hubKey.replace(/^hub:/, "") }).then((ok) => {
+      // If the save failed, put the device back now; if the new placement never shows up, in 10 s.
+      if (!ok) { this._optimistic.delete(n.key); redraw(); } else setTimeout(redraw, 10500);
+    });
+    this._sig = "";
+    this.hass = this._hass;
+  }
+
   _ref(n) {
     return (n.raw && (n.raw.mac || n.raw.ip)) || n.mac || n.ip || n.label;
   }
@@ -759,9 +781,10 @@ class NetOrbitCard extends HTMLElement {
     const entryId = this._summaryEntry();
     if (entryId) data.config_entry_id = entryId;
     this._sig = "";
-    return this._hass.callService("netorbit", service, data).catch((e) => {
+    return this._hass.callService("netorbit", service, data).then(() => true, (e) => {
       console.error("NetOrbit:", e);
       this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: `NetOrbit: ${e.message || e}` }, bubbles: true, composed: true }));
+      return false;
     });
   }
 
@@ -806,7 +829,7 @@ class NetOrbitCard extends HTMLElement {
       const hub = q(".hub").value;
       if (!hub) { q(".hub").focus(); return; }
       this._closePop(wrap);
-      this._call("assign_device", { device: [this._ref(n)], hub });
+      this._moveTo(n, "hub:" + hub);
     });
     if (q(".reset")) q(".reset").addEventListener("click", () => { this._closePop(wrap); this._call("reset_placement", { device: [this._ref(n)] }); });
     q(".mk").addEventListener("click", () => { const t = q(".type").value; this._closePop(wrap); this._call("confirm_hub", { device: this._ref(n), type: t }); });

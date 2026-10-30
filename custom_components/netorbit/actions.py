@@ -26,7 +26,10 @@ async def _save(hass: HomeAssistant, entry: ConfigEntry, coord: NetOrbitCoordina
     coord.internal_update = True
     hass.config_entries.async_update_entry(entry, options=opts)
     coord.apply_options(entry)
-    await coord.async_refresh()
+    # Redraw the map now from what NetOrbit already knows, then check the network in the
+    # background. Waiting for a ping round here made every drag take a second or two.
+    coord.async_rebuild()
+    entry.async_create_background_task(hass, coord.async_request_refresh(), "netorbit refresh after change")
 
 
 def _opts(coord: NetOrbitCoordinator) -> dict[str, Any]:

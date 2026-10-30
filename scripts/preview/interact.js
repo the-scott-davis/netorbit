@@ -36,6 +36,8 @@ const assert = require("node:assert");
   let calls = await page.evaluate(() => window.calls);
   assert.deepStrictEqual(calls.at(-1).slice(0, 2), ["netorbit", "assign_device"]);
   assert.strictEqual(calls.at(-1)[2].hub, "m1");
+  // The device is drawn under its new hub right away, with a "saving" ring, before Home Assistant answers.
+  assert.ok(await card.locator(`.node.pending[data-key="${plug}"] .pendring`).count(), "moved device shows as saving at once");
   console.log("drag ok:", JSON.stringify(calls.at(-1)[2]));
 
   // 3. Tap a device, use Move to.
