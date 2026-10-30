@@ -107,6 +107,27 @@ async def test_suggestions_confirm_and_dismiss(hass: HomeAssistant, fake_net) ->
     assert "00:00:5f:00:53:21" in entry.options["dismissed_hubs"]  # example-ok: synthetic test value
 
 
+async def test_confirm_hub_and_move_devices_under_it(hass: HomeAssistant, fake_net) -> None:
+    """Dropping a device on a suggested hub on the card confirms the hub and places the device in one save."""
+    _network(fake_net)
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    res = await hass.services.async_call(
+        DOMAIN, "confirm_hub", {"device": MAYBE_MAC, "type": "access_point", "name": "Garden AP", "assign": ["192.0.2.12"]},
+        blocking=True, return_response=True,
+    )
+    assert res["assigned"] == ["nas"]
+    hub_id = res["hub"]
+    assert entry.options["devices"][NAS_MAC]["hub"] == hub_id
+    # The new hub's own address never ends up placed under itself.
+    res = await hass.services.async_call(
+        DOMAIN, "confirm_hub", {"device": "192.0.2.10", "assign": ["192.0.2.10", "192.0.2.12"]},
+        blocking=True, return_response=True,
+    )
+    assert TV_MAC not in entry.options["devices"]
+    assert entry.options["devices"][NAS_MAC]["hub"] == res["hub"]
+
+
 async def test_manual_beats_automatic_and_reset(hass: HomeAssistant, fake_net) -> None:
     _network(fake_net)
     entry = _entry("auto")

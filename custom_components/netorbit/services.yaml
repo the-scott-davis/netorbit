@@ -64,6 +64,7 @@ confirm_hub:
         select:
           options: [router, switch, access_point, mesh_node, other]
     name: {selector: {text: {}}}
+    assign: {selector: {text: {multiple: true}}}
     config_entry_id: {selector: {config_entry: {integration: netorbit}}}
 
 dismiss_hub:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5
+
+### Changed
+- Dragging a device onto a suggested hub (the spinning pink ring) now asks "Make it a hub?" and, if you say yes, makes it a hub and moves the device under it in one step. Before, suggested hubs ignored the drop.
+- The `confirm_hub` service takes an optional `assign` list of devices to place under the new hub.
+
 ## 0.2.4
 
 ### Fixed

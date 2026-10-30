@@ -68,7 +68,7 @@ SCHEMAS: dict[str, vol.Schema] = {
                                     vol.Optional("type"): vol.In(HUB_TYPES), vol.Optional("parent"): cv.string}),
     SERVICE_IMPORT_LIST: vol.Schema({**ENTRY, vol.Required("hub"): cv.string, vol.Required("text"): cv.string,
                                      vol.Optional("add_missing", default=True): cv.boolean}),
-    SERVICE_CONFIRM_HUB: vol.Schema({**ENTRY, vol.Required("device"): cv.string,
+    SERVICE_CONFIRM_HUB: vol.Schema({**ENTRY, vol.Required("device"): cv.string, vol.Optional("assign"): DEVICE_LIST,
                                      vol.Optional("type"): vol.In(HUB_TYPES), vol.Optional("name"): cv.string}),
     SERVICE_DISMISS_HUB: vol.Schema({**ENTRY, vol.Required("device"): cv.string}),
 }
@@ -110,7 +110,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         SERVICE_IMPORT: lambda e, c, a: actions.import_config(hass, e, c, a["data"], a["replace"]),
         SERVICE_UPDATE_HUB: lambda e, c, a: actions.update_hub(hass, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent")),
         SERVICE_IMPORT_LIST: lambda e, c, a: actions.import_list(hass, e, c, a["hub"], a["text"], a["add_missing"]),
-        SERVICE_CONFIRM_HUB: lambda e, c, a: actions.confirm_hub(hass, e, c, a["device"], a.get("type"), a.get("name")),
+        SERVICE_CONFIRM_HUB: lambda e, c, a: actions.confirm_hub(hass, e, c, a["device"], a.get("type"), a.get("name"), a.get("assign")),
         SERVICE_DISMISS_HUB: lambda e, c, a: actions.dismiss_hub(hass, e, c, a["device"]),
     }
     for name, fn in table.items():

@@ -175,11 +175,22 @@ async def import_list(hass, entry, coord, hub: str, text: str, add_missing: bool
     }
 
 
-async def confirm_hub(hass, entry, coord, device: str, hub_type: str | None = None, name: str | None = None) -> dict[str, Any]:
+async def confirm_hub(
+    hass, entry, coord, device: str, hub_type: str | None = None, name: str | None = None,
+    assign: list[str] | None = None,
+) -> dict[str, Any]:
+    """Make a device a hub. `assign` places other devices under the new hub in the same save
+    (the card does this when someone drops a device on a suggested hub)."""
     key = coord.resolve_device(device)
     rec = coord.known_device(key) if key else None
     if not rec:
         raise ActionError(f"No device matches '{device}'")
+    keys: list[str] = []
+    if assign:
+        keys, missing = _devices(coord, assign)
+        keys = [k for k in keys if k != key]
+        if not keys:
+            raise ActionError(f"None of these devices were found: {', '.join(missing) or ', '.join(assign)}")
     suggestion = next((s for s in (coord.data.suggested_hubs if coord.data else []) if s["key"] == key), None)
     hub_type = hub_type or (suggestion or {}).get("type") or HUB_AP
     name = name or (suggestion or {}).get("name") or _name(coord, key)
@@ -187,6 +198,9 @@ async def confirm_hub(hass, entry, coord, device: str, hub_type: str | None = No
     result = manage.add_hub(opts, name, hub_type, None, rec.get("ip"), rec.get("mac"), source="manual")
     # The device is now a hub, so drop any device-level settings for it.
     opts[CONF_DEVICES].pop(key, None)
+    if keys:
+        manage.assign(opts, keys, result["hub"])
+        result["assigned"] = [_name(coord, k) for k in keys]
     await _save(hass, entry, coord, opts)
     return result
 

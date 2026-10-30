@@ -383,6 +383,10 @@
           "name": "Name",
           "description": "Optional new name."
         },
+        "assign": {
+          "name": "Move devices here",
+          "description": "Optional devices (names, IPs or MAC addresses) to place under the new hub."
+        },
         "config_entry_id": {
           "name": "Config entry",
           "description": "Only needed if you have more than one NetOrbit entry."

@@ -2,7 +2,7 @@
  * Draws a live radial map from the NetOrbit integration's sensors.
  * https://github.com/the-scott-davis/netorbit  (MIT)
  */
-const NETORBIT_VERSION = "0.2.4";
+const NETORBIT_VERSION = "0.2.5";
 
 const NO_STATUS = {
   online: { color: "#34d399", label: "Online" },
@@ -500,7 +500,7 @@ class NetOrbitCard extends HTMLElement {
   .node.draggable { cursor:grab; }
   .node:hover .disc { stroke-width:4; }
   .node:hover .dlab { fill:#fff; font-weight:600; }
-  .node.hub.hot .disc { stroke:#60a5fa !important; stroke-width:6; }
+  .node.hot .disc { stroke:#60a5fa !important; stroke-width:6; }
   .ghost { fill:rgba(96,165,250,.25); stroke:#60a5fa; stroke-width:2; pointer-events:none; }
   .tip { position:absolute; pointer-events:none; background:rgba(15,23,42,.96); border:1px solid rgba(148,163,184,.25); border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.55; color:#e2e8f0; min-width:190px; max-width:280px; box-shadow:0 10px 30px rgba(0,0,0,.45); opacity:0; transition:opacity .12s; z-index:2; }
   .tiptip { margin-top:6px; padding-top:6px; border-top:1px solid rgba(148,163,184,.2); color:#93c5fd; }
@@ -634,7 +634,15 @@ class NetOrbitCard extends HTMLElement {
       const m = svg.getScreenCTM();
       return m ? pt.matrixTransform(m.inverse()) : { x: 0, y: 0 };
     };
-    const nearestHub = (p) => {
+    // Where a dragged device would land: a hub within reach, or a suggested hub (pink ring) when the
+    // pointer is right on it. Dropping on a suggestion asks to make it a hub first. Anywhere else
+    // returns null and nothing moves.
+    const nearestTarget = (p, skipKey) => {
+      for (const d of devices) {
+        if (!d.suggested || d.key === skipKey) continue;
+        const dp = this._pos[d.key];
+        if (dp && Math.hypot(dp.x - p.x, dp.y - p.y) < 24) return d;
+      }
       let best = null, bestD = 75;
       Object.values(hubs).forEach((h) => {
         if (h.kind !== "hub") return;
@@ -671,9 +679,9 @@ class NetOrbitCard extends HTMLElement {
         tip.style.opacity = "0";
         const p = toSvg(ev);
         ghost.setAttribute("cx", p.x); ghost.setAttribute("cy", p.y);
-        const h = nearestHub(p);
-        this.shadowRoot.querySelectorAll(".node.hub.hot").forEach((x) => x.classList.remove("hot"));
-        if (h) { const hel = this.shadowRoot.querySelector(`.node.hub[data-key="${CSS.escape(h.key)}"]`); if (hel) hel.classList.add("hot"); }
+        const h = nearestTarget(p, d.n.key);
+        this.shadowRoot.querySelectorAll(".node.hot").forEach((x) => x.classList.remove("hot"));
+        if (h) { const hel = this.shadowRoot.querySelector(`.node[data-key="${CSS.escape(h.key)}"]`); if (hel) hel.classList.add("hot"); }
         d.target = h;
       });
       const finish = (ev) => {
@@ -684,12 +692,13 @@ class NetOrbitCard extends HTMLElement {
         // without a pointermove there.
         if (ev.type === "pointerup" && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) >= 6) {
           d.moved = true;
-          d.target = nearestHub(toSvg(ev));
+          d.target = nearestTarget(toSvg(ev), d.n.key);
         }
         ghost.setAttribute("cx", -500); ghost.setAttribute("cy", -500);
-        this.shadowRoot.querySelectorAll(".node.hub.hot").forEach((x) => x.classList.remove("hot"));
+        this.shadowRoot.querySelectorAll(".node.hot").forEach((x) => x.classList.remove("hot"));
         if (d.moved) {
-          if (d.target && d.target.key !== d.n.link) this._call("assign_device", { device: [this._ref(d.n)], hub: d.target.key.replace(/^hub:/, "") });
+          if (d.target && d.target.suggested) this._dropOnSuggestPopup(d.target, d.n, ev, wrap, place);
+          else if (d.target && d.target.key !== d.n.link) this._call("assign_device", { device: [this._ref(d.n)], hub: d.target.key.replace(/^hub:/, "") });
           else this._sig = "";
           return;
         }
@@ -829,6 +838,25 @@ class NetOrbitCard extends HTMLElement {
     const q = (sel) => pop.querySelector(sel);
     q(".yes").addEventListener("click", () => { this._closePop(wrap); this._call("confirm_hub", { device: s.key, type: s.type || "access_point" }); });
     q(".no").addEventListener("click", () => { this._closePop(wrap); this._call("dismiss_hub", { device: s.key }); });
+  }
+
+  // A device was dropped on a suggested hub: confirm it as a hub and move the device under it in one step.
+  _dropOnSuggestPopup(target, moving, ev, wrap, place) {
+    const s = target.suggested;
+    const want = s.type && NO_HUB_TYPE[s.type] ? s.type : "access_point";
+    const types = Object.entries(NO_HUB_TYPE).filter(([k]) => k !== "router").map(([k, v]) => `<option value="${k}" ${k === want ? "selected" : ""}>${v}</option>`).join("");
+    const pop = this._openPop(
+      `<b>Make ${noEsc(target.label)} a hub?</b><div class="muted">${noEsc(moving.label)} will be placed under it.</div>` +
+      `<label>It is a<select class="type">${types}</select></label>` +
+      `<div class="row"><button class="go yes">Make hub and move</button><button class="x">Cancel</button></div>`,
+      ev, wrap, place, 260, 170
+    );
+    const q = (sel) => pop.querySelector(sel);
+    q(".yes").addEventListener("click", () => {
+      const t = q(".type").value;
+      this._closePop(wrap);
+      this._call("confirm_hub", { device: s.key, type: t, assign: [this._ref(moving)] });
+    });
   }
 
   _newPopup(n, ev, wrap, place) {

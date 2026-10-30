@@ -73,7 +73,7 @@ Whatever NetOrbit couldn't work out, you can place yourself. Three ways, use whi
 
 ![Dragging devices onto a hub](howto-drag.gif)
 
-**Confirm a possible hub.** Devices with a spinning pink ring look like network gear. Tap one and choose **It's a hub** (or **Not a hub**). Then drag its devices onto it.
+**Confirm a possible hub.** Devices with a spinning pink ring look like network gear. Tap one and choose **It's a hub** (or **Not a hub**). Or, in **Edit layout**, drag a device straight onto the pink ring: NetOrbit asks to make it a hub and moves the device under it.
 
 ![Confirming a suggested hub](howto-confirm-hub.gif)
 
