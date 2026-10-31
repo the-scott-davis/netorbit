@@ -209,10 +209,10 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `group_by_type` | `true` | Group unplaced devices by type. |
 | `hide_sleepy_offline` | `false` | Hide sleep-allowed devices while they're offline. |
 | `max_devices` | `80` | Above this many devices, each hub shows its problem devices first and folds the rest into a "+N more" bubble. |
-| `zoom` | `true` | Pinch, double-tap, Ctrl+scroll or the + and − buttons zoom the map; drag to look around while zoomed in. `false` for a fixed map. |
+| `zoom` | `true` | Pinch, double-tap, Ctrl/Cmd+scroll or the + and − buttons zoom the map; drag to look around while zoomed in. `false` for a fixed map. |
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 
-Hover a device for details, tap it for its history. Pinch or double-tap to zoom in on a busy part of the map (Ctrl+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get an **Edit layout** button.
+Hover a device for details, tap it for its history. Pinch or double-tap to zoom in on a busy part of the map (Ctrl/Cmd+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get an **Edit layout** button.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 

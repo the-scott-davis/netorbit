@@ -7,7 +7,13 @@
 - A brand new install finishes setup right away and fills the map once the first scan is done.
 
 ### Added
+- **Zoom and pan the map.** Pinch, double-tap or Ctrl/Cmd+scroll to zoom, drag to look around, or use the + and - buttons (thanks @xlntech1, #12). Turn it off with the card option `zoom: false`.
 - Scan progress on `sensor.netorbit_devices_online`: `scanning`, `scan_phase`, `scan_progress`, `found` and `first_scan_done`. They change a few times per scan, for the first scan and for the regular ones, and stay out of the history database (`first_scan_done` aside).
+
+### Fixed
+- A mouse button released just outside the map no longer leaves the map panning whenever the mouse moves over it.
+- A Home Assistant update that arrives while you tap or press the map is drawn when you let go. Before, it waited for the next update.
+- Ctrl+scroll zooms at the same speed in Firefox, which reports scroll in lines.
 
 ## 0.2.8
 

@@ -39,6 +39,34 @@ jobs:
           node-version: "22"
       - run: node --test tests/card.test.js
 
+  browser:
+    name: Browser tests (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install Playwright and the icon set the preview uses
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.63.0 @mdi/js@7.4.47
+          cp node_modules/@mdi/js/mdi.js scripts/preview/mdi.js
+      - name: Install the browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Serve the repository
+        run: |
+          python3 -m http.server 8766 > /dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8766/scripts/preview/index.html > /dev/null && break; sleep 1; done
+      - name: Edit layout, zoom and touch in ${{ matrix.browser }}
+        run: BROWSER=${{ matrix.browser }} node scripts/preview/interact.js
+
   examples:
     runs-on: ubuntu-latest
     steps:
