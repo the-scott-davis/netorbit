@@ -38,6 +38,8 @@ const assert = require("node:assert");
   assert.strictEqual(calls.at(-1)[2].hub, "m1");
   // The device is drawn under its new hub right away, with a "saving" ring, before Home Assistant answers.
   assert.ok(await card.locator(`.node.pending[data-key="${plug}"] .pendring`).count(), "moved device shows as saving at once");
+  // A device you placed by hand shows as pinned in edit mode: blue fill plus a pin badge.
+  assert.ok(await card.locator(`.node.pinned[data-key="${plug}"] .pin path`).count(), "moved device shows as pinned");
   console.log("drag ok:", JSON.stringify(calls.at(-1)[2]));
 
   // 3. Tap a device, use Move to.
