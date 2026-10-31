@@ -556,9 +556,13 @@ async def check_browser(pw, engine: str, ha: HA, version: str, out: pathlib.Path
 
 
 # Watches the card's shadow root and notes the first-scan pill texts and whether the normal header came back
-# after them (status chips, no radar left from the reveal).
+# after them (status chips, no radar left from the reveal). Returns false when it was already watching this card.
+# The page can reload, or the card be drawn anew, under the check; it is installed again on every poll then.
 OBSERVE_JS = """(card) => {
   const root = card.shadowRoot;
+  if (!root) return false;
+  if (window.__netorbitSeen && window.__netorbitRoot === root) return false;
+  window.__netorbitRoot = root;
   const seen = (window.__netorbitSeen = { pills: [], normal: false });
   const look = () => {
     const pill = root.querySelector(".scanpill .l1");
@@ -571,7 +575,12 @@ OBSERVE_JS = """(card) => {
   };
   new MutationObserver(look).observe(root, { childList: true, subtree: true, characterData: true });
   look();
+  return true;
 }"""
+
+
+NORMAL_JS = """(card) => { const r = card.shadowRoot;
+  return !!(r && r.querySelector(".head .chip") && !r.querySelector(".radar, .scanpill")); }"""
 
 
 async def check_scan_takeover(pw, ha: HA, args, out: pathlib.Path) -> None:
@@ -584,30 +593,58 @@ async def check_scan_takeover(pw, ha: HA, args, out: pathlib.Path) -> None:
     browser = await pw.chromium.launch()
     try:
         page, _console, page_errors = await logged_in_page(browser, ha)
+        loads: list[str] = []
+        page.on("load", lambda: loads.append(page.url))
         await page.goto(f"{ha.url}/{DASHBOARD}/{VIEW}", wait_until="domcontentloaded")
         card = page.locator("netorbit-card").first
         await card.wait_for(state="attached", timeout=20000)
-        await card.evaluate(OBSERVE_JS)
+        # Let the dashboard settle (the map drawn) before NetOrbit goes away under it.
+        try:
+            await card.evaluate("(c) => new Promise((ok) => { const t0 = Date.now(); const f = () => "
+                                "(c.shadowRoot && c.shadowRoot.querySelector('svg.map')) || Date.now() - t0 > 30000 ? ok() : setTimeout(f, 200); f(); })")
+        except Exception as err:  # noqa: BLE001 - the page reloaded; the loop below finds the card again
+            log(f"chromium: waiting for the map: {type(err).__name__}: {err}")
+        pills: list[str] = []
+        normal = False
+        installs = 0
+
+        async def poll() -> None:
+            """Watch the card that is there now and add what it saw since the last poll."""
+            nonlocal normal, installs
+            try:
+                if await card.evaluate(OBSERVE_JS, timeout=5000):
+                    installs += 1
+                seen = await page.evaluate("() => window.__netorbitSeen || null")
+                now_normal = await card.evaluate(NORMAL_JS, timeout=5000)
+            except Exception:  # noqa: BLE001 - navigating or redrawing right now; try again next round
+                return
+            for p in (seen or {}).get("pills") or []:
+                if not pills or pills[-1] != p:
+                    pills.append(p)
+            # The normal header counts once the pill has been seen, by the watcher or by an earlier poll.
+            normal = normal or bool(pills and ((seen or {}).get("normal") or now_normal))
+
+        await poll()
         for entry in await ha.get("/api/config/config_entries/entry?domain=netorbit"):
             await ha.delete(f"/api/config/config_entries/entry/{entry['entry_id']}")
-        log("Removed NetOrbit and adding it again with the dashboard open")
+        log(f"Removed NetOrbit and adding it again with the dashboard open (page loads so far: {len(loads)})")
         await add_netorbit(ha, args.subnet, args.gateway)
         deadline = time.monotonic() + 240
-        seen: dict = {}
         shot = False
         while time.monotonic() < deadline:
-            seen = await page.evaluate("() => window.__netorbitSeen")
-            if seen.get("pills") and not shot:
+            await poll()
+            if pills and not shot:
                 out.mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=str(out / "chromium-first-scan.png"))
                 shot = True
-            if seen.get("normal"):
+            if normal:
                 break
             await page.wait_for_timeout(250)
-        pills = seen.get("pills") or []
+        if installs > 1 or len(loads) > 1:
+            log(f"chromium: the page loaded {len(loads)} time(s) and the card was watched {installs} time(s) during the check")
         if not any(p.startswith("Scanning your network... found") for p in pills):
             fail(f"{title} no scanning pill", f"The card never showed 'Scanning your network... found N devices' during the first scan. Seen: {pills}")
-        elif not seen.get("normal"):
+        elif not normal:
             fail(f"{title} header didn't come back", f"After the first scan the card should show the normal header. Pills seen: {pills}")
         else:
             log(f"chromium: first scan pill went {pills[0]!r} .. {pills[-1]!r}, then the normal header came back")
