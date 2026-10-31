@@ -78,17 +78,18 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
         for node in data.nodes.values():
             if node.kind == INTERNET_KEY:
                 continue
+            extra = {k: v for k, v in (("managed_by", node.managed_by), ("fields", node.fields), ("dns_name", node.fqdn)) if v}
             if node.kind == "hub":
                 hubs.append({
                     "id": node.key.removeprefix("hub:"), "name": node.name, "type": node.hub_type,
                     "connected_to": node.link, "ip": node.ip, "mac": node.mac, "status": node.status,
-                    "added_by": node.hub_source,
+                    "added_by": node.hub_source, **extra,
                 })
             else:
                 devices.append({
                     "name": node.name, "ip": node.ip, "mac": node.mac, "hub": node.link,
                     "placed_by": node.placement, "status": node.status, "vendor": node.vendor,
-                    "hostname": node.hostname, "allowed_to_sleep": node.sleepy,
+                    "hostname": node.hostname, "allowed_to_sleep": node.sleepy, **extra,
                 })
     return {
         "hubs": hubs,
@@ -124,6 +125,7 @@ async def add_hub(
     hass, entry, coord, name: str | None = None, hub_type: str = HUB_AP, parent: str | None = None,
     ip: str | None = None, mac: str | None = None, device: str | None = None,
 ) -> dict[str, Any]:
+    named_by_netorbit = False
     if device:
         key = coord.resolve_device(device)
         if not key:
@@ -131,24 +133,27 @@ async def add_hub(
         rec = coord.known_device(key) or {}
         ip = ip or rec.get("ip")
         mac = mac or rec.get("mac")
-        name = name or _name(coord, key)
+        if not name:
+            name, named_by_netorbit = _name(coord, key), True
     if not name:
         raise ActionError("A hub needs a name")
     parent_id = _hub(coord, parent, default_root=True)
     opts = _opts(coord)
-    result = manage.add_hub(opts, name, hub_type, parent_id, ip, normalize_mac(mac), source="manual")
+    # A name taken from the device record is NetOrbit's guess, not a choice.
+    result = manage.add_hub(opts, name, hub_type, parent_id, ip, normalize_mac(mac), source="manual", name_auto=named_by_netorbit)
     if parent:
         manage.update_hub(opts, result["hub"], parent=parent_id)
     await _save(hass, entry, coord, opts)
     return result
 
 
-async def update_hub(hass, entry, coord, hub: str, **fields: Any) -> dict[str, Any]:
+async def update_hub(hass, entry, coord, hub: str, **changes: Any) -> dict[str, Any]:
+    """Rename a hub, change its type or parent, or its Managed by / extra fields."""
     hub_id = _hub(coord, hub)
-    if fields.get("parent"):
-        fields["parent"] = _hub(coord, fields["parent"])
+    if changes.get("parent"):
+        changes["parent"] = _hub(coord, changes["parent"])
     opts = _opts(coord)
-    manage.update_hub(opts, hub_id, **{k: v for k, v in fields.items() if v is not None})
+    manage.update_hub(opts, hub_id, **{k: v for k, v in changes.items() if v is not None})
     await _save(hass, entry, coord, opts)
     return {"hub": hub_id}
 
@@ -205,9 +210,10 @@ async def confirm_hub(
             raise ActionError(f"None of these devices were found: {', '.join(missing) or ', '.join(assign)}")
     suggestion = next((s for s in (coord.data.suggested_hubs if coord.data else []) if s["key"] == key), None)
     hub_type = hub_type or (suggestion or {}).get("type") or HUB_AP
+    chosen = bool(name)
     name = name or (suggestion or {}).get("name") or _name(coord, key)
     opts = _opts(coord)
-    result = manage.add_hub(opts, name, hub_type, None, rec.get("ip"), rec.get("mac"), source="manual")
+    result = manage.add_hub(opts, name, hub_type, None, rec.get("ip"), rec.get("mac"), source="manual", name_auto=not chosen)
     # The device is now a hub, so drop any device-level settings for it.
     opts[CONF_DEVICES].pop(key, None)
     if keys:
@@ -230,26 +236,32 @@ async def dismiss_hub(hass, entry, coord, device: str) -> dict[str, Any]:
 
 async def update_device(
     hass, entry, coord, device: str, name: str | None = None, icon: str | None = None,
-    sleepy: bool | None = None, hub: str | None = None,
+    sleepy: bool | None = None, hub: str | None = None, managed_by: str | None = None,
+    fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Change what a person set on a device. An empty name or icon goes back to the discovered one."""
     key = coord.resolve_device(device)
     if not key:
         raise ActionError(f"No device matches '{device}'")
     opts = _opts(coord)
     cfg = opts[CONF_DEVICES].setdefault(key, {})
     cfg["tracked"] = True
-    if name:
-        cfg["name"] = name
-    if icon:
-        cfg["icon"] = icon
+    for label, value in (("name", name), ("icon", icon)):
+        if value is None:
+            continue
+        if value.strip():
+            cfg[label] = value.strip()
+        else:
+            cfg.pop(label, None)
     if sleepy is not None:
         cfg["sleepy"] = sleepy
     if hub:
         manage.assign(opts, [key], _hub(coord, hub))
+    manage.set_fields(cfg, managed_by, fields)
     if key in opts[CONF_IGNORED]:
         opts[CONF_IGNORED].remove(key)
     await _save(hass, entry, coord, opts)
-    return {"device": name or _name(coord, key)}
+    return {"device": (name or "").strip() or _name(coord, key)}
 
 
 EXPORT_VERSION = 1
@@ -258,11 +270,12 @@ EXPORT_VERSION = 1
 def export_config(coord: NetOrbitCoordinator) -> dict[str, Any]:
     """Everything a person has set up, keyed by MAC, so it can be backed up or moved."""
     opts = coord.opts
-    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at")
+    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at", "managed_by", "fields")
+    hub_keep = ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source", "name_auto", "managed_by", "fields")
     return {
         "netorbit_export": EXPORT_VERSION,
         "hubs": [
-            {k: h.get(k) for k in ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source") if h.get(k) is not None}
+            {k: h.get(k) for k in hub_keep if h.get(k) is not None}
             for h in opts[CONF_HUBS]
         ],
         "devices": {key: {k: v for k, v in cfg.items() if k in keep} for key, cfg in opts[CONF_DEVICES].items()},

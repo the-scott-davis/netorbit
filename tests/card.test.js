@@ -384,3 +384,24 @@ test("stop() ends the pump and clears its timer", () => {
   assert.strictEqual(finished, 0);
   assert.strictEqual(clk.q.length, 0);
 });
+
+const { noLink, noParseFields } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+
+test("managed by: a link, a node on the map, or words", () => {
+  const nodes = { "hub:core": { key: "hub:core", kind: "hub", label: "Core Switch", ip: "192.0.2.5" }, d1: { key: "d1", kind: "device", label: "NAS", mac: "00:00:5E:00:53:0A", hostname: "nas" } };
+  assert.deepStrictEqual(noLink("https://192.0.2.5/admin", nodes), { kind: "url", href: "https://192.0.2.5/admin" });
+  assert.deepStrictEqual(noLink("core switch", nodes), { kind: "node", key: "hub:core" });
+  assert.deepStrictEqual(noLink("core", nodes), { kind: "node", key: "hub:core" });
+  assert.deepStrictEqual(noLink("00:00:5e:00:53:0a", nodes), { kind: "node", key: "d1" });
+  assert.deepStrictEqual(noLink("nas", nodes), { kind: "node", key: "d1" });
+  assert.deepStrictEqual(noLink("ISP support", nodes), { kind: "text" });
+  assert.deepStrictEqual(noLink("javascript:alert(1)", nodes), { kind: "text" });
+  assert.deepStrictEqual(noLink("", nodes), { kind: "none" });
+});
+
+test("extra fields parse one Label: value per line", () => {
+  assert.deepStrictEqual(noParseFields("Location: Hall\n\nURL: https://192.0.2.1/x\nEmpty:"), { Location: "Hall", URL: "https://192.0.2.1/x", Empty: "" });
+  assert.throws(() => noParseFields("no separator"), /Label: value/);
+  assert.throws(() => noParseFields(": nothing before"), /Label: value/);
+  assert.deepStrictEqual(noParseFields(""), {});
+});

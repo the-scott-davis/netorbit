@@ -91,13 +91,17 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
   assert.strictEqual(calls.at(-1)[1], "confirm_hub");
   console.log("suggestion ok:", JSON.stringify(calls.at(-1)[2]));
 
-  // 7. Outside edit mode, tapping a device opens Home Assistant's details.
+  // 7. Outside edit mode, tapping a device opens its details popup; "More info" there opens Home Assistant's dialog.
   await page.evaluate(() => document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)));
   const tvNow = await center(discOf(tv)); // the edit banner is gone, so the map moved up
   await page.mouse.click(tvNow.x, tvNow.y);
+  const info = card.locator(".pop .info");
+  await info.waitFor();
+  assert.strictEqual((await info.textContent()).trim(), "More info", "tap opens the details popup");
+  await info.click();
   const opened = await page.evaluate(() => window.moreInfo);
-  assert.ok(opened && opened.startsWith("sensor.netorbit_"), "tap opens details");
-  console.log("more-info ok:", opened);
+  assert.ok(opened && opened.startsWith("sensor.netorbit_"), "More info opens Home Assistant's details");
+  console.log("details + more-info ok:", opened);
 
   // 8. Touch: drag with a finger on a phone sized screen.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
@@ -695,15 +699,17 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
   //      a pinch zooms. The events go through Chrome's DevTools protocol so the browser applies touch-action itself.
   if (IS_WEBKIT) {
     const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    await p.evaluate(() => document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)));
     const tvKey = await keyOfIn(p, "Bedroom TV");
     await p.locator("netorbit-card").locator(`.node[data-key="${tvKey}"] circle.disc`).tap();
-    assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
+    const details = p.locator("netorbit-card").locator(".pop .info");
+    await details.waitFor();
+    assert.ok(await details.isVisible(), "a tap on a device opens its details on a phone");
+    await p.locator("netorbit-card").locator(".pop .x").tap();
     console.log("phone tap ok (WebKit; swipe and pinch need Chrome's DevTools protocol and run in Chromium only)");
     await p.close();
   } else {
     const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    await p.evaluate(() => { document.body.style.paddingBottom = "2400px"; document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)); });
+    await p.evaluate(() => { document.body.style.paddingBottom = "2400px"; });
     const cdp = await p.context().newCDPSession(p);
     const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts.map((q, i) => ({ x: q.x, y: q.y, id: i })) });
     const wait = (ms) => p.waitForTimeout(ms);
@@ -716,8 +722,11 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const tvKey = await keyOfIn(p, "Bedroom TV");
     const tv = await centerIn(p, `.node[data-key="${tvKey}"] circle.disc`);
     await touch("touchStart", [tv]); await wait(40); await touch("touchEnd", []); await wait(250);
-    assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
+    const details = p.locator("netorbit-card").locator(".pop .info");
+    await details.waitFor();
+    assert.ok(await details.isVisible(), "a tap on a device opens its details on a phone");
     assert.strictEqual(await viewBox(p), whole, "a tap does not move the map");
+    await p.locator("netorbit-card").locator(".pop .x").tap(); // back to the plain map for the swipe and pinch below
 
     // One finger swiping up over the whole map scrolls the page.
     assert.strictEqual(await p.evaluate(() => window.scrollY), 0);

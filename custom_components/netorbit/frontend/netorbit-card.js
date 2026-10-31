@@ -68,6 +68,30 @@ function noHeight(v) {
   return s;
 }
 
+/** What a "Managed by" text points at: a web link, a node on the map, or just words. Exported for tests. */
+function noLink(text, nodes) {
+  const t = String(text || "").trim();
+  if (!t) return { kind: "none" };
+  if (/^https?:\/\/\S+$/i.test(t)) return { kind: "url", href: t };
+  const low = t.toLowerCase();
+  const hit = Object.values(nodes || {}).find((n) => n && (n.kind === "hub" || n.kind === "device") &&
+    [n.label, n.key, n.key && n.key.replace(/^hub:/, ""), n.ip, n.mac, n.hostname, n.fqdn].some((v) => v && String(v).toLowerCase() === low));
+  return hit ? { kind: "node", key: hit.key } : { kind: "text" };
+}
+
+/** "Label: value" per line -> {label: value}; a line without a colon is an error. Exported for tests. */
+function noParseFields(text) {
+  const out = {};
+  for (const raw of String(text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const i = line.indexOf(":");
+    if (i < 1) throw new Error(`Write each field as "Label: value" (not "${noTrunc(line, 30)}")`);
+    out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+
 /** Pure layout: returns positions for hubs and leaves. Exported for tests. */
 function netorbitLayout(model, opts) {
   const o = Object.assign({ cx: 500, cy: 500, rDev: 370, rHub1: 135, hubStep: 125, rHubMax: 290, rGroup: 245 }, opts || {});
@@ -990,6 +1014,7 @@ class NetOrbitCard extends HTMLElement {
         key: a.node_key, entity: s.entity_id, label: reg.name || a.label || a.friendly_name, ip: a.ip, mac: a.mac, ip_changes: a.ip_changes || 0,
         kind: a.kind, link: a.link, parent: a.link, sleepy: a.sleepy === true, last_seen: a.last_seen,
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
+        fqdn: a.fqdn, managed_by: a.managed_by, fields: a.fields || {}, first_seen: a.first_seen,
         status: NO_STATUS[s.state] ? s.state : "unknown",
       };
       // A device just dropped on a hub is drawn there right away, with a "saving" ring, until
@@ -999,7 +1024,8 @@ class NetOrbitCard extends HTMLElement {
         if (n.link === opt.link || Date.now() - opt.t > 10000) this._optimistic.delete(n.key);
         else { n.link = n.parent = opt.link; n.placement = "manual"; n.pending = true; }
       }
-      sig.push([n.key, n.status, n.link, n.label, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0].join("~"));
+      // Free text is only shown in the details popup, but it is part of the signature so a saved edit redraws.
+      sig.push([n.key, n.status, n.link, n.label, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0, n.fqdn || "", n.managed_by || "", JSON.stringify(n.fields)].join("~"));
       if (a.kind === "hub") {
         hubs[n.key] = n;
         if (!n.link && !root) root = n.key;
@@ -1178,6 +1204,15 @@ class NetOrbitCard extends HTMLElement {
   .pop button { flex:1; font:inherit; padding:7px 10px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#1e293b; color:#e2e8f0; cursor:pointer; }
   .pop button.go { background:#2563eb; border-color:#2563eb; }
   .pop button.warn { border-color:rgba(248,113,113,.5); color:#fecaca; }
+  .pop.det { width:320px; max-width:calc(100% - 8px); max-height:calc(100% - 8px); overflow:auto; box-sizing:border-box; }
+  .pop .sec { margin-top:10px; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:#64748b; }
+  .pop .kv { display:grid; grid-template-columns:92px 1fr; gap:3px 8px; margin-top:4px; font-size:12.5px; line-height:1.4; }
+  .pop .kv .k { color:#94a3b8; }
+  .pop .kv .v { overflow-wrap:anywhere; }
+  .pop a { color:#93c5fd; text-decoration:none; }
+  .pop a:hover { text-decoration:underline; }
+  .pop textarea { width:100%; box-sizing:border-box; margin-top:4px; font:inherit; font-size:12.5px; padding:6px 8px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#0b1220; color:#e2e8f0; resize:vertical; }
+  .pop .err { color:#fecaca; font-size:12px; margin-top:6px; min-height:0; }
   .mlist { max-height:240px; overflow:auto; margin-top:8px; }
   .mrow { display:flex; align-items:center; gap:8px; padding:4px 2px; cursor:pointer; border-radius:6px; }
   .mrow:hover { background:rgba(148,163,184,.1); }
@@ -1788,6 +1823,7 @@ class NetOrbitCard extends HTMLElement {
         if (n.kind === "new") { this._newPopup(n, ev, wrap, place); return; }
         if (n.kind === "more") { this._morePopup(n, ev, wrap, place); return; }
         if (this._edit && n.kind === "hub") { this._hubPopup(n, ev, wrap, place, n.key === root, hubs, root); return; }
+        if (n.kind === "hub" || n.kind === "device") { this._detailsPopup(n, ev, wrap, place, hubs, all, col); return; }
         if (n.entity) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: n.entity }, bubbles: true, composed: true }));
       });
     });
@@ -1934,8 +1970,9 @@ class NetOrbitCard extends HTMLElement {
       (n.ip ? `<div><span class="k">IP</span>${noEsc(n.ip)}</div>` : "") +
       (n.mac ? `<div><span class="k">MAC</span>${noEsc(n.mac)}</div>` : "") +
       (n.vendor ? `<div><span class="k">Maker</span>${noEsc(n.vendor)}</div>` : "") +
-      (n.hostname && n.hostname !== n.label ? `<div><span class="k">Host</span>${noEsc(n.hostname)}</div>` : "") +
+      ((n.fqdn || n.hostname) && (n.fqdn || n.hostname) !== n.label ? `<div><span class="k">DNS name</span>${noEsc(n.fqdn || n.hostname)}</div>` : "") +
       (via ? `<div><span class="k">Via</span>${noEsc(via)}</div>` : "") +
+      (n.managed_by ? `<div><span class="k">Managed by</span>${noEsc(noTrunc(n.managed_by, 40))}</div>` : "") +
       (n.kind === "device" && n.placement ? `<div><span class="k">Placed</span>${noEsc(NO_PLACEMENT[n.placement] || n.placement)}</div>` : "") +
       `<div><span class="k">Last seen</span>${n.status === "online" ? "now" : noRel(n.last_seen)}</div>` +
       this._dhcpTip(n);
@@ -2138,6 +2175,71 @@ class NetOrbitCard extends HTMLElement {
     }));
   }
 
+  // Everything NetOrbit knows about a hub or device, and (for admins) its name and free text to edit.
+  _detailsPopup(n, ev, wrap, place, hubs, all, col) {
+    const admin = this._isAdmin();
+    const dns = n.fqdn || n.hostname;
+    const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
+    const row = (k, v) => (v ? `<span class="k">${noEsc(k)}</span><span class="v">${v}</span>` : "");
+    const link = noLink(n.managed_by, all);
+    const managed = !n.managed_by ? "" :
+      link.kind === "url" ? `<a href="${noEsc(link.href)}" target="_blank" rel="noopener noreferrer">${noEsc(n.managed_by)}</a>` :
+      link.kind === "node" ? `<a href="#" class="jump" data-key="${noEsc(link.key)}">${noEsc(n.managed_by)}</a> <span class="muted">on this map</span>` :
+      noEsc(n.managed_by);
+    const fields = Object.entries(n.fields || {}).map(([k, v]) => row(k, noEsc(v))).join("");
+    const what = n.kind === "hub" ? (NO_HUB_TYPE[n.hub_type] || "Hub") : "Device";
+    const html =
+      `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(what)} · <span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · allowed to sleep" : ""}</div>` +
+      `<div class="kv">${row("DNS name", dns && dns !== n.label ? noEsc(dns) : "")}${row("IP", noEsc(n.ip))}${row("MAC", noEsc(n.mac))}${row("Maker", noEsc(n.vendor))}</div>` +
+      `<div class="sec">Connection</div><div class="kv">${row("Via", noEsc(via))}${n.kind === "device" ? row("Placed", noEsc(NO_PLACEMENT[n.placement] || n.placement || "")) : ""}</div>` +
+      (managed || fields ? `<div class="sec">Fields</div><div class="kv">${row("Managed by", managed)}${fields}</div>` : "") +
+      `<div class="sec">History</div><div class="kv">${row("First seen", n.first_seen ? noEsc(noRel(n.first_seen)) : "")}${row("Last seen", n.status === "online" ? "now" : noEsc(noRel(n.last_seen)))}${n.ip_changes ? row("IP changes", String(n.ip_changes)) : ""}</div>` +
+      `<div class="row">${admin ? `<button class="go ed">Edit</button>` : ""}${n.entity ? `<button class="info">More info</button>` : ""}<button class="x">Close</button></div>`;
+    const pop = this._openPop(html, ev, wrap, place, 320, 360);
+    pop.classList.add("det");
+    const q = (s) => pop.querySelector(s);
+    if (q(".info")) q(".info").addEventListener("click", () => {
+      this._closePop(wrap);
+      this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: n.entity }, bubbles: true, composed: true }));
+    });
+    if (q(".jump")) q(".jump").addEventListener("click", (e) => {
+      e.preventDefault();
+      const target = all[q(".jump").dataset.key];
+      if (!target) { this._closePop(wrap); return; }
+      const el = this.shadowRoot.querySelector(`.node[data-key="${CSS.escape(target.key)}"]`);
+      if (el) { el.classList.add("hot"); setTimeout(() => el.classList.remove("hot"), 1800); }
+      this._detailsPopup(target, ev, wrap, place, hubs, all, col);
+    });
+    if (q(".ed")) q(".ed").addEventListener("click", () => this._detailsEdit(n, ev, wrap, place, hubs, all, col));
+  }
+
+  _detailsEdit(n, ev, wrap, place, hubs, all, col) {
+    const text = Object.entries(n.fields || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+    const pop = this._openPop(
+      `<b>Edit ${noEsc(n.label)}</b>` +
+      `<label>Name<input class="name" value="${noEsc(n.label)}"></label>` +
+      `<label>Managed by<input class="mb" value="${noEsc(n.managed_by || "")}" placeholder="A link, or the name of a hub or device on the map"></label>` +
+      `<label>Extra fields, one per line as Label: value<textarea class="fx" rows="4" placeholder="Location: Garage&#10;Serial: ABC123">${noEsc(text)}</textarea></label>` +
+      `<div class="err"></div>` +
+      `<div class="row"><button class="go save">Save</button><button class="back">Back</button><button class="x">Close</button></div>`,
+      ev, wrap, place, 320, 360
+    );
+    pop.classList.add("det");
+    const q = (s) => pop.querySelector(s);
+    q(".back").addEventListener("click", () => this._detailsPopup(n, ev, wrap, place, hubs, all, col));
+    q(".save").addEventListener("click", () => {
+      let fields;
+      try { fields = noParseFields(q(".fx").value); } catch (e) { q(".err").textContent = e.message; return; }
+      // The box shows every field, so what is missing now has been removed.
+      const data = { managed_by: q(".mb").value.trim(), fields: Object.assign(Object.fromEntries(Object.keys(n.fields || {}).map((k) => [k, null])), fields) };
+      const name = q(".name").value.trim();
+      if (name && name !== n.label) data.name = name;
+      if (n.kind === "hub") data.hub = n.key.replace(/^hub:/, ""); else data.device = this._ref(n);
+      this._closePop(wrap);
+      this._call(n.kind === "hub" ? "update_hub" : "update_device", data);
+    });
+  }
+
   _summaryEntry() {
     const s = this._entities().find((x) => x.attributes.kind === "summary");
     return s ? s.attributes.config_entry_id : undefined;
@@ -2166,5 +2268,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noLink, noParseFields };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");
