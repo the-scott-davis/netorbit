@@ -281,6 +281,10 @@ NetOrbit runs on your network. The only thing it sends outside it is the interne
 
 ## Contributing
 
+Pull requests are welcome from anyone, no permission needed. Fork the repo, make a branch, and open a PR against `main`. PRs are squash-merged with you kept as the commit author, so you show up in the history and the Contributors list. [CONTRIBUTING.md](CONTRIBUTING.md) has the full steps, what CI checks, and how review and releases work.
+
+To run the checks locally:
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements_test.txt
