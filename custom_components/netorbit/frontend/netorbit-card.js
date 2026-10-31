@@ -838,7 +838,8 @@ class NetOrbitCard extends HTMLElement {
       const t = this._takeoverModel(model);
       const r = t.hubs[t.root];
       const sig = JSON.stringify(["takeover", r.label, r.status, r.icon, t.internet && t.internet.status]);
-      if (sig !== this._sig) { this._sig = sig; this._render(t, "takeover"); }
+      // The first scan always shows the whole map (no zoom), and so does the reveal after it.
+      if (sig !== this._sig) { this._sig = sig; this._view = null; this._render(t, "takeover"); }
       this._updateScan(model);
       this._mode = "takeover";
       return;
@@ -849,6 +850,7 @@ class NetOrbitCard extends HTMLElement {
     // The first scan just finished: play the map in once.
     const reveal = this._mode === "takeover" && !!model.root;
     this._mode = mode;
+    if (reveal) this._view = null;
     this._render(model, reveal ? "reveal" : mode);
     if (reveal) this._playReveal();
   }
@@ -1214,6 +1216,7 @@ class NetOrbitCard extends HTMLElement {
     this._popOpen = false;
     const model = this._model();
     if (!model.root) return;
+    this._view = null;
     this._render(model, "reveal");
     this._playReveal();
   }

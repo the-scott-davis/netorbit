@@ -158,8 +158,8 @@ function assertSafe(text, what) {
 test("shareModel names devices by type, numbered per type by hub then name", () => {
   const m = card.shareModel(richModel());
   const byType = m.devices.map((d) => d.label);
-  // Basement Switch comes before Kitchen Router and Attic AP; within a hub, by name.
-  assert.deepStrictEqual(byType, ["Device 1", "Camera 1", "Laptop 1", "Device 2", "Tablet 1", "TV 1", "Camera 2", "TV 2"]);
+  // Hubs by name (Attic AP, Basement Switch, Kitchen Router), then devices by name within each hub.
+  assert.deepStrictEqual(byType, ["TV 1", "Camera 1", "TV 2", "Device 1", "Camera 2", "Laptop 1", "Device 2", "Tablet 1"]);
   assert.strictEqual(m.title, "My home network");
   // The same network in another order gives the same names.
   const again = card.shareModel(richModel((list) => list.slice().reverse()));
