@@ -65,7 +65,16 @@ jobs:
           python3 -m http.server 8766 > /dev/null 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8766/scripts/preview/index.html > /dev/null && break; sleep 1; done
       - name: Edit layout, zoom and touch in ${{ matrix.browser }}
-        run: BROWSER=${{ matrix.browser }} node scripts/preview/interact.js
+        run: |
+          set +e
+          BROWSER=${{ matrix.browser }} node scripts/preview/interact.js > interact.log 2>&1
+          code=$?
+          cat interact.log
+          if [ $code -ne 0 ]; then
+            # Put the end of the log in an annotation, which stays readable when the raw log is not at hand.
+            echo "::error title=interact.js failed::$(tail -n 14 interact.log | head -c 1500 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+          fi
+          exit $code
 
   examples:
     runs-on: ubuntu-latest
