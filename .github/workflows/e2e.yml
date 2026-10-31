@@ -30,8 +30,8 @@ jobs:
       matrix:
         ha: [pinned, beta]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -58,7 +58,7 @@ jobs:
       # Home Assistant boots while the browsers install.
       - name: Cache Playwright browsers
         id: browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('scripts/ci/requirements_e2e.txt') }}
@@ -79,7 +79,7 @@ jobs:
           cp ha-config/home-assistant.log e2e-artifacts/ 2>/dev/null || true
           python scripts/ci/ha_e2e.py check-log e2e-artifacts/home-assistant.log e2e-artifacts/docker.log
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-${{ matrix.ha }}

@@ -89,6 +89,58 @@ test("height takes pixels or a CSS length, and nothing that could leave the styl
   assert.strictEqual(noHeight("url('x')"), "900px");
 });
 
+const BASE = { x: -70, y: -40, w: 1140, h: 1090 };
+const MIDDLE = { x: BASE.x + BASE.w / 2, y: BASE.y + BASE.h / 2 };
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+
+test("zooming about the middle keeps the middle and the shape of the map", () => {
+  const { netorbitZoomView } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+  const v = netorbitZoomView(null, MIDDLE, MIDDLE, 2);
+  assert.ok(near(v.w, BASE.w / 2) && near(v.h, BASE.h / 2));
+  assert.ok(near(v.x + v.w / 2, MIDDLE.x) && near(v.y + v.h / 2, MIDDLE.y));
+  assert.ok(near(v.w / v.h, BASE.w / BASE.h));
+});
+
+test("the map point under the finger stays under it through a pinch", () => {
+  const { netorbitZoomView } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+  const start = netorbitZoomView(null, MIDDLE, MIDDLE, 2);
+  const anchor = { x: 300, y: 420 };
+  const now = { x: 350, y: 470 }; // the fingers' midpoint moved, and they spread 1.5x
+  const v = netorbitZoomView(start, anchor, now, 1.5);
+  // Where `now` sits on the screen in the start view is where the anchor must sit in the new one.
+  assert.ok(near((anchor.x - v.x) / v.w, (now.x - start.x) / start.w));
+  assert.ok(near((anchor.y - v.y) / v.h, (now.y - start.y) / start.h));
+  assert.ok(near(v.w, BASE.w / 3));
+});
+
+test("a drag pans by the finger's travel", () => {
+  const { netorbitZoomView } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+  const v = netorbitZoomView(null, MIDDLE, MIDDLE, 2);
+  const p = netorbitZoomView(v, { x: 400, y: 400 }, { x: 450, y: 430 }, 1);
+  assert.ok(near(p.x, v.x - 50) && near(p.y, v.y - 30) && near(p.w, v.w));
+});
+
+test("zooming out past the whole map gives the whole map", () => {
+  const { netorbitZoomView } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+  const v = netorbitZoomView(null, MIDDLE, MIDDLE, 2);
+  assert.strictEqual(netorbitZoomView(v, MIDDLE, MIDDLE, 0.4), null);
+  assert.strictEqual(netorbitZoomView(null, MIDDLE, MIDDLE, 0.5), null);
+  assert.strictEqual(netorbitZoomView(null, MIDDLE, MIDDLE, 1), null);
+});
+
+test("zoom stops at the maximum and the view stays inside the map", () => {
+  const { netorbitZoomView } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+  let v = null;
+  for (let i = 0; i < 20; i++) v = netorbitZoomView(v, MIDDLE, MIDDLE, 2);
+  assert.ok(near(v.w, BASE.w / 5) && near(v.h, BASE.h / 5));
+  const corner = { x: BASE.x, y: BASE.y };
+  const w = netorbitZoomView(null, corner, corner, 3);
+  assert.ok(near(w.x, BASE.x) && near(w.y, BASE.y));
+  // Dragging the finger far up and left pulls the far corner of the map into view and no further.
+  const far = netorbitZoomView(w, corner, { x: corner.x - 5000, y: corner.y - 5000 }, 1);
+  assert.ok(near(far.x + far.w, BASE.x + BASE.w) && near(far.y + far.h, BASE.y + BASE.h));
+});
+
 test("group hubs sit near their devices, not in the middle", () => {
   const hubs = { r: { key: "r", label: "Router" }, g: { key: "g", parent: "r", label: "TVs", kind: "group" } };
   const devices = [1, 2, 3].map((i) => ({ key: "d" + i, link: "g", label: "TV " + i }));

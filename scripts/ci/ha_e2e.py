@@ -198,6 +198,87 @@ class HA:
         return out
 
 
+class SummaryWatch:
+    """Records every state of NetOrbit's summary sensor from the websocket event stream.
+
+    Started before NetOrbit is added, so the check sees the very first state the sensor gets, however quickly the
+    first network scan finishes afterwards.
+    """
+
+    def __init__(self, ha: HA) -> None:
+        self.ha = ha
+        self.states: list[dict] = []  # (attributes plus "_t", seconds since start) in the order they happened
+        self._ready = asyncio.Event()
+        self._task: asyncio.Task | None = None
+        self._t0 = time.monotonic()
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._listen())
+        await asyncio.wait_for(self._ready.wait(), timeout=30)
+
+    async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+    async def _listen(self) -> None:
+        async with self.ha.s.ws_connect(self.ha.url + "/api/websocket") as ws:
+            await ws.receive_json()  # auth_required
+            await ws.send_json({"type": "auth", "access_token": self.ha.token})
+            if (await ws.receive_json()).get("type") != "auth_ok":
+                raise RuntimeError("Websocket auth failed")
+            await ws.send_json({"id": 1, "type": "subscribe_events", "event_type": "state_changed"})
+            while True:
+                msg = await ws.receive_json()
+                if msg.get("type") == "result" and msg.get("id") == 1:
+                    if not msg.get("success"):
+                        raise RuntimeError(f"subscribe_events failed: {msg.get('error')}")
+                    self._ready.set()
+                elif msg.get("type") == "event":
+                    new = (msg.get("event") or {}).get("data", {}).get("new_state") or {}
+                    attrs = new.get("attributes") or {}
+                    if attrs.get("netorbit") is True and attrs.get("kind") == "summary":
+                        self.states.append({**attrs, "_t": round(time.monotonic() - self._t0, 1)})
+
+
+async def check_first_scan(watch: SummaryWatch, timeout: float = 240) -> None:
+    """Setup finishes before the first network scan: the summary sensor first shows a scan in progress (or not
+    done yet), and later shows it finished."""
+    deadline = time.monotonic() + timeout
+    done = None
+    while time.monotonic() < deadline:
+        done = next((a for a in watch.states if a.get("first_scan_done") is True and a.get("scanning") is False), None)
+        if done:
+            break
+        await asyncio.sleep(1)
+    if not watch.states:
+        fail("No summary states", "The summary sensor never showed up on the websocket event stream")
+        return
+    first = watch.states[0]
+    if not (first.get("scanning") is True or first.get("first_scan_done") is False):
+        fail("Setup waited for the scan",
+             "The summary sensor's first state should show the first network scan still running "
+             f"(scanning true or first_scan_done false), got scanning={first.get('scanning')!r} "
+             f"first_scan_done={first.get('first_scan_done')!r}")
+    phases = []
+    for a in watch.states:
+        if a.get("scanning") and (not phases or phases[-1] != a.get("scan_phase")):
+            phases.append(a.get("scan_phase"))
+    if not done:
+        last = {k: watch.states[-1].get(k) for k in ("scanning", "scan_phase", "scan_progress", "first_scan_done", "found")}
+        fail("First scan never finished", f"After {timeout:.0f}s the summary sensor still shows {last}")
+        return
+    log(f"First scan: first state scanning={first.get('scanning')} first_scan_done={first.get('first_scan_done')}, "
+        f"phases {phases}, done after {done['_t']}s with {done.get('found')} found, last_scan {done.get('last_scan')}")
+    summary.append(f"setup finished before the first scan (phases {', '.join(map(str, phases))}); "
+                   f"scan done in {done['_t']}s, {done.get('found')} found")
+    if not done.get("last_scan"):
+        fail("No last_scan after the first scan", f"first_scan_done is true but last_scan is {done.get('last_scan')!r}")
+
+
 def _narrow(subnet: str, gateway: str) -> str:
     """NetOrbit refuses huge subnets; docker hands out /16s. Watch the /24 around the gateway instead."""
     net = ipaddress.ip_network(subnet, strict=False)
@@ -424,8 +505,14 @@ async def run(args) -> int:
             await ha.onboard()
             config = await ha.get("/api/config")
             summary.append(f"Home Assistant {config.get('version')}, NetOrbit {version}")
-            gateway = await add_netorbit(ha, args.subnet, args.gateway)
-            await check_sensors(ha, gateway)
+            watch = SummaryWatch(ha)
+            await watch.start()
+            try:
+                gateway = await add_netorbit(ha, args.subnet, args.gateway)
+                await check_sensors(ha, gateway)
+                await check_first_scan(watch)
+            finally:
+                await watch.stop()
             await add_sample_devices(ha)
             await make_dashboard(ha)
         except Exception as err:  # noqa: BLE001

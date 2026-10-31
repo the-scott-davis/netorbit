@@ -209,16 +209,17 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `group_by_type` | `true` | Group unplaced devices by type. |
 | `hide_sleepy_offline` | `false` | Hide sleep-allowed devices while they're offline. |
 | `max_devices` | `80` | Above this many devices, each hub shows its problem devices first and folds the rest into a "+N more" bubble. |
+| `zoom` | `true` | Pinch, double-tap, Ctrl+scroll or the + and − buttons zoom the map; drag to look around while zoomed in. `false` for a fixed map. |
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 
-Hover a device for details, tap it for its history. Admins get an **Edit layout** button.
+Hover a device for details, tap it for its history. Pinch or double-tap to zoom in on a busy part of the map (Ctrl+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get an **Edit layout** button.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Entities, events and services
 
 - One sensor per hub and tracked device. State is `online`, `recent` or `stale`. Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
-- `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`.
+- `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`. While a network scan runs it also shows `scanning: true`, the current `scan_phase` (`ping`, `arp`, `names`, `snmp`, `layout`), a rough `scan_progress` (0 to 100) and how many addresses it has `found` so far. `first_scan_done` turns true once the very first scan on this install has finished.
 - `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
 | Event | Data |
@@ -280,6 +281,10 @@ NetOrbit runs on your network. The only thing it sends outside it is the interne
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Contributing
+
+Pull requests are welcome from anyone, no permission needed. Fork the repo, make a branch, and open a PR against `main`. PRs are squash-merged with you kept as the commit author, so you show up in the history and the Contributors list. [CONTRIBUTING.md](CONTRIBUTING.md) has the full steps, what CI checks, and how review and releases work.
+
+To run the checks locally:
 
 ```bash
 python -m venv .venv && . .venv/bin/activate

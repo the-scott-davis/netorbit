@@ -56,5 +56,6 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
         "seen_records": len(coord._seen),  # noqa: SLF001
         "new_devices": len(data.new_devices) if data else 0,
         "last_scan": data.last_scan if data else None,
+        "scan": {**coord.scan, "first_scan_done": coord.first_scan_done},
         "nodes": nodes,
     }
