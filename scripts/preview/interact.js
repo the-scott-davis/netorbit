@@ -67,7 +67,7 @@ const assert = require("node:assert");
   assert.deepStrictEqual(calls.at(-1).slice(1), ["update_hub", { hub: "m1", name: "Upstairs Node", config_entry_id: "preview" }]);
   console.log("rename ok");
 
-  // 5b. Change a hub's type (a powerline extender that was added as a plain hub, say).
+  // 5b. Change a hub's type (a Wi-Fi extender that was added as a plain hub, say).
   await card.locator('.node.hub[data-key="hub:m1"]').click();
   await card.locator(".pop select.type").selectOption("access_point");
   await card.locator(".pop .save").click();
