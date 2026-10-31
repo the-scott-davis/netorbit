@@ -35,7 +35,7 @@ def _entry(mode: str = "auto", **opts) -> MockConfigEntry:
 def _node_states(hass: HomeAssistant) -> dict[str, object]:
     out = {}
     for st in hass.states.async_all("sensor"):
-        if st.attributes.get("netorbit") and st.attributes.get("kind") != "summary":
+        if st.attributes.get("netorbit") and st.attributes.get("kind") not in ("summary", "internet"):
             out[st.attributes["label"]] = st
     return out
 
@@ -302,3 +302,56 @@ async def test_old_installs_look_names_up_again(hass: HomeAssistant, fake_net) -
     await hass.services.async_call(DOMAIN, "scan_now", {}, blocking=True)
     await hass.async_block_till_done()
     assert "Office Mac" in _node_states(hass)
+
+
+def _internet(hass: HomeAssistant):
+    return next((s for s in hass.states.async_all("sensor") if s.attributes.get("kind") == "internet"), None)
+
+
+async def test_internet_check(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """The Internet node is online while a public resolver answers, turns red (stale) after two
+    missed rounds while the router still answers, and is unknown when the router is down too."""
+    fake_net.alive = {GATEWAY, "1.1.1.1", "8.8.8.8"}
+    down = async_capture_events(hass, "netorbit_internet_down")
+    up = async_capture_events(hass, "netorbit_internet_up")
+    stale = async_capture_events(hass, "netorbit_device_stale")
+    await _setup(hass, _entry("auto"))
+    assert _internet(hass).state == "online"
+
+    fake_net.alive -= {"1.1.1.1", "8.8.8.8"}
+    await _advance(hass, freezer, 61)
+    assert _internet(hass).state == "online"  # one missed round is not an outage
+    await _advance(hass, freezer, 61)
+    assert _internet(hass).state == "stale"
+    assert len(down) == 1 and stale == []
+
+    fake_net.alive.discard(GATEWAY)
+    await _advance(hass, freezer, 61)
+    assert _internet(hass).state == "unknown"  # router down too: can't tell
+
+    fake_net.alive |= {GATEWAY, "8.8.8.8"}
+    await _advance(hass, freezer, 61)
+    assert _internet(hass).state == "online"
+    assert len(up) == 0  # it went stale -> unknown -> online, not stale -> online
+
+    fake_net.alive -= {"8.8.8.8"}
+    await _advance(hass, freezer, 61)
+    await _advance(hass, freezer, 61)
+    fake_net.alive.add("1.1.1.1")
+    await _advance(hass, freezer, 61)
+    assert len(down) == 2 and len(up) == 1
+
+
+async def test_internet_check_can_be_turned_off(hass: HomeAssistant, fake_net) -> None:
+    fake_net.alive = {GATEWAY, "1.1.1.1"}
+    pinged: list[str] = []
+    real = fake_net.multiping
+
+    async def spy(addresses, **kwargs):
+        pinged.extend(addresses)
+        return await real(addresses, **kwargs)
+
+    fake_net.multiping = spy
+    await _setup(hass, _entry("auto", check_internet=False))
+    assert _internet(hass) is None
+    assert "1.1.1.1" not in pinged and "8.8.8.8" not in pinged

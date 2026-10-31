@@ -97,7 +97,7 @@ def _snapshot(hass: HomeAssistant) -> tuple[dict, dict]:
     hubs, devices = {}, {}
     for st in hass.states.async_all("sensor"):
         a = st.attributes
-        if not a.get("netorbit") or a.get("kind") == "summary":
+        if not a.get("netorbit") or a.get("kind") in ("summary", "internet"):
             continue
         (hubs if a["kind"] == "hub" else devices)[a["node_key"]] = st
     return hubs, devices

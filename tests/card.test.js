@@ -80,3 +80,10 @@ test("group hubs sit near their devices, not in the middle", () => {
   const L = netorbitLayout({ hubs, devices, root: "r" });
   assert.ok(Math.hypot(L.pos.g.x - 500, L.pos.g.y - 500) > 200);
 });
+
+test("hubs keep clear of the internet node above the router", () => {
+  const m = model([["r", null], ["a", "r"], ["b", "r"], ["c", "r"], ["d", "r"], ["e", "r"], ["f", "r"]], { a: 6, b: 6, c: 6, d: 6, e: 6, f: 6 });
+  const L = netorbitLayout(m);
+  const inet = { x: L.pos.r.x, y: L.pos.r.y - 62 }; // the default spot; the card moves it to a clear diagonal if a link runs there
+  for (const k of "abcdef") assert.ok(dist(L.pos[k], inet) > 16 + 25, k); // node radii: internet 16, hub 25
+});

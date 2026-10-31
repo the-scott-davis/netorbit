@@ -162,11 +162,13 @@ Under the integration's **Configure** menu:
 | Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to. |
 | Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", stop tracking. |
 | Review new devices | In manual mode, choose which newly found devices to track. |
-| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, SNMP on/off and SNMP community. |
+| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, SNMP on/off and SNMP community. |
 
 **Tracking mode:** *Automatic* tracks everything it finds. *Manual* only tracks devices you add, and lists the rest under "New devices".
 
 **Allowed to sleep** is for TVs, consoles and anything else that's off a lot. They still show their status but never fire the stale event.
+
+**The internet check** (on by default) puts an Internet node just above your router. Each ping round also pings two public DNS servers, Cloudflare's `1.1.1.1` and Google's `8.8.8.8`. The node turns red ("Internet down") when neither answers for two rounds in a row while your router still answers, so you can tell an internet outage from a Wi-Fi problem. If the router isn't answering either, it shows grey, because NetOrbit can't tell. Turn it off under **Settings** if you'd rather NetOrbit never sends anything outside your network.
 
 ### DHCP, MAC addresses and keeping your setup
 
@@ -203,6 +205,7 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `height` | `900` | Maximum height in pixels. |
 | `show_ip` | `false` | Show hub IPs under their names instead of the hub type. Off by default so screenshots are safe to share. |
 | `show_legend` | `true` | Show the legend at the bottom. |
+| `show_internet` | `true` | Show the Internet node above the router (needs the internet check turned on in the integration's settings). |
 | `group_by_type` | `true` | Group unplaced devices by type. |
 | `hide_sleepy_offline` | `false` | Hide sleep-allowed devices while they're offline. |
 | `max_devices` | `80` | Above this many devices, each hub shows its problem devices first and folds the rest into a "+N more" bubble. |
@@ -216,12 +219,15 @@ Hover a device for details, tap it for its history. Admins get an **Edit layout*
 
 - One sensor per hub and tracked device. State is `online`, `recent` or `stale`. Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
 - `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`.
+- `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
 | Event | Data |
 | --- | --- |
 | `netorbit_new_device` | `name`, `ip`, `mac` |
 | `netorbit_device_stale` | `name`, `ip`, `mac`, `kind`, `last_seen` |
 | `netorbit_device_recovered` | `name`, `ip`, `mac`, `kind`, `last_seen` |
+| `netorbit_internet_down` | `since` |
+| `netorbit_internet_up` | `since` |
 
 Every service returns a response describing what it did. Devices can be given by name, IP or MAC; hubs by name or id.
 
@@ -263,7 +269,7 @@ Import either from **Settings > Automations & scenes > Blueprints > Import bluep
 
 ## Privacy
 
-NetOrbit runs entirely on your network and never contacts anything outside it. Maker names come from a list bundled with Home Assistant. Diagnostics downloads replace every IP, MAC and name with placeholders, so they're safe to attach to an issue. The card hides IPs by default.
+NetOrbit runs on your network. The only thing it sends outside it is the internet check: a ping to `1.1.1.1` and `8.8.8.8` each round, which you can turn off under **Settings**. No data about your network goes with it. Maker names come from a list bundled with Home Assistant. Diagnostics downloads replace every IP, MAC and name with placeholders, so they're safe to attach to an issue. The card hides IPs by default.
 
 ## Roadmap
 

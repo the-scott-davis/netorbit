@@ -59,6 +59,17 @@ def test_device_seen_only_toward_the_router_sits_on_the_router():
     assert topo.device_hub["nas"] == "sw2"  # everything else unchanged
 
 
+def test_device_known_only_to_a_lower_switch_is_left_alone():
+    """The switch next to the router has forgotten a quiet device, the one below it still lists
+    it on its uplink. That only says "upstream of SW2", so the device keeps its last placement
+    instead of jumping to the router."""
+    tables, hubs, devices = _home()
+    del tables["sw1"][PRN]  # aged out of SW1, where it sits behind AP1
+    assert tables["sw2"][PRN] == 1  # SW2 still has it, on its uplink
+    topo = infer(tables, hubs, GW, devices, "gateway", leaf_hubs={"ap1", "ap2", "ap3"})
+    assert "printer" not in topo.device_hub
+
+
 def test_no_tables_means_no_opinion():
     topo = infer({}, {"gateway": GW}, GW, {"tv": TV}, "gateway")
     assert topo.device_hub == {} and topo.hub_parent == {}

@@ -32,6 +32,12 @@
       netorbit: true, kind: "summary", stale_hours: 24, mode: "manual", config_entry_id: "preview", group_by_type: true,
       suggested_hubs: suggested.map(([name, type, reasons]) => { const m = mac(); return { key: m.toLowerCase(), mac: m, ip: "192.0.2." + (220 + n), name, type, reasons }; }),
       new_devices: fresh.map((name, i) => ({ key: "new" + i, name, mac: mac(), ip: "192.0.2." + (200 + i), first_seen: ago(1), last_seen: ago(0) })) } };
+    // ?internet=down shows an outage, ?internet=off leaves the node out.
+    const inet = new URLSearchParams(location.search).get("internet");
+    if (inet !== "off") {
+      states["sensor.netorbit_internet"] = { entity_id: "sensor.netorbit_internet", state: inet === "down" ? "stale" : "online", attributes: {
+        netorbit: true, kind: "internet", label: "Internet", node_key: "internet", last_seen: ago(3) } };
+    }
     return states;
   }
 
