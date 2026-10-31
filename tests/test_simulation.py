@@ -84,7 +84,7 @@ async def _run(hass: HomeAssistant, fake_net, net: Network, *, community_known: 
     entry.add_to_hass(hass)
     t0 = time.perf_counter()
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)  # the first scan runs in the background
     coord = entry.runtime_data
     await coord.async_refresh()
     await hass.async_block_till_done()
@@ -337,7 +337,7 @@ async def test_manual_always_wins_and_survives_restart(hass: HomeAssistant, fake
 
     # Restart: unload and set up again from what was saved.
     assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     await entry.runtime_data.async_refresh()
     hubs2, devices2 = _snapshot(hass)
     assert sorted(s.attributes["label"] for s in hubs2.values()) == hub_names

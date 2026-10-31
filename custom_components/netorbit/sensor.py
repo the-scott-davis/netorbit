@@ -133,12 +133,19 @@ class NetOrbitSummarySensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity
     _attr_translation_key = "summary"
     _attr_icon = "mdi:orbit"
     _attr_native_unit_of_measurement = "devices"
+    # Scan progress is only interesting while it happens; keep it out of the history database.
+    _unrecorded_attributes = frozenset({"scanning", "scan_phase", "scan_progress", "found"})
 
     def __init__(self, coordinator: NetOrbitCoordinator) -> None:
         super().__init__(coordinator)
         entry = coordinator.config_entry
         self._attr_unique_id = f"{entry.entry_id}_summary"
         self._attr_device_info = _device_info(entry.entry_id, entry.title)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Scan progress changes a few times per sweep, between map updates.
+        self.async_on_remove(self.coordinator.async_add_scan_listener(self.async_write_ha_state))
 
     @property
     def native_value(self) -> int:
@@ -156,6 +163,7 @@ class NetOrbitSummarySensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity
                 if node.kind == "device":
                     counts[node.status] = counts.get(node.status, 0) + 1
         opts = self.coordinator.opts
+        scan = self.coordinator.scan
         return {
             "netorbit": True,
             "kind": "summary",
@@ -170,5 +178,10 @@ class NetOrbitSummarySensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity
             "sources": data.sources if data else [],
             "group_by_type": opts.get("group_by_type", True),
             "last_scan": data.last_scan if data else None,
+            "scanning": scan["scanning"],
+            "scan_phase": scan["phase"],
+            "scan_progress": scan["progress"],
+            "found": scan["found"],
+            "first_scan_done": self.coordinator.first_scan_done,
             "config_entry_id": self.coordinator.config_entry.entry_id,
         }

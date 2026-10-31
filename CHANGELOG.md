@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Faster startup.** Home Assistant no longer waits for NetOrbit's network scan when it starts, so the "Waiting for integrations to complete setup: netorbit" message is gone. NetOrbit draws the map from what it saved and pings those devices, then runs the full scan (ping sweep, ARP, names, SNMP) in the background and updates the map when it's done. The hub tree from the last scan is saved too, so the map looks the same right after a restart.
+- A brand new install finishes setup right away and fills the map once the first scan is done.
+
+### Added
+- Scan progress on `sensor.netorbit_devices_online`: `scanning`, `scan_phase`, `scan_progress`, `found` and `first_scan_done`. They change a few times per scan, for the first scan and for the regular ones, and stay out of the history database (`first_scan_done` aside).
+
 ## 0.2.8
 
 ### Added
