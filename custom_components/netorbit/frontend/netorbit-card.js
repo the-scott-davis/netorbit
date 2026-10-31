@@ -19,6 +19,9 @@ const NO_ICON_PENDING = new Set();
 // that asked (a second card, or the card editor's preview, would otherwise keep blank icons).
 const NO_ICON_CARDS = new Set();
 
+// mdi:pin, drawn on pinned devices in edit mode.
+const NO_PIN_PATH = "M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z";
+
 // Possible hubs get a color of their own, so they never look like "seen recently".
 const NO_SUGGEST = { color: "#f472b6", light: "#f9a8d4", soft: "rgba(244,114,182,.5)" };
 
@@ -463,14 +466,17 @@ class NetOrbitCard extends HTMLElement {
       const tr = p.r + 24;
       const tx = C.x + tr * Math.cos(p.a), ty = C.y + tr * Math.sin(p.a);
       const rot = flip ? deg + 180 : deg;
-      gfx += `<g class="node dev ${d.status} ${d.sleepy ? "sleepy" : ""} ${d.pending ? "pending" : ""} ${edit && d.kind === "device" ? "draggable" : ""}" data-key="${noEsc(d.key)}">` +
+      const pinned = edit && d.placement === "manual";
+      gfx += `<g class="node dev ${d.status} ${d.sleepy ? "sleepy" : ""} ${d.pending ? "pending" : ""} ${pinned ? "pinned" : ""} ${edit && d.kind === "device" ? "draggable" : ""}" data-key="${noEsc(d.key)}">` +
         (d.pending ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="pendring"/>` : "") +
         (live(d.status) ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="halo" fill="${c}"/>` : "") +
         (d.suggested ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="sugring"/>` : "") +
         `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15" class="disc ${d.status === "stale" ? "pulse" : ""} ${d.kind === "new" ? "dashed" : ""}" stroke="${c}"/>` +
         iconFO(p, 15, d.icon, c) +
         (d.sleepy ? `<circle cx="${(p.x + 11).toFixed(1)}" cy="${(p.y - 11).toFixed(1)}" r="5" class="zz"/>` : "") +
-        (d.placement === "manual" && edit ? `<circle cx="${(p.x - 11).toFixed(1)}" cy="${(p.y - 11).toFixed(1)}" r="4.5" class="pin"/>` : "") +
+        // Pinned by hand (edit mode): blue fill, the outline keeps its status color, plus a pin badge.
+        (pinned ? `<g class="pin" pointer-events="none"><circle cx="${(p.x - 13).toFixed(1)}" cy="${(p.y - 13).toFixed(1)}" r="8.5"/>` +
+          `<path d="${NO_PIN_PATH}" transform="translate(${(p.x - 19).toFixed(1)} ${(p.y - 19).toFixed(1)}) scale(0.5) rotate(30 12 12)"/></g>` : "") +
         `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" transform="rotate(${rot.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)})" text-anchor="${flip ? "end" : "start"}" dominant-baseline="middle" class="dlab" style="font-size:${fs.toFixed(1)}px${d.suggested ? `;fill:${NO_SUGGEST.light}` : ""}">${noEsc(noTrunc(d.label, maxChars))}</text></g>`;
     });
 
@@ -522,7 +528,9 @@ class NetOrbitCard extends HTMLElement {
   .halo { opacity:.13; filter:url(#noblur); }
   .sugring { fill:none; stroke:#f472b6; stroke-width:2; stroke-dasharray:3 3; animation: spin 6s linear infinite; transform-box:fill-box; transform-origin:center; }
   @keyframes spin { to { transform:rotate(360deg); } }
-  .pin { fill:#60a5fa; stroke:#0f172a; stroke-width:1.5; }
+  .node.pinned .disc { fill:rgba(29,78,216,.55); }
+  .pin circle { fill:#2563eb; stroke:#0b1220; stroke-width:2; }
+  .pin path { fill:#fff; }
   .pulse { animation: pulse 1.8s ease-in-out infinite; }
   @keyframes pulse { 50% { stroke-width:5; } }
   .hlab { fill:#f1f5f9; font-size:15px; font-weight:600; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }

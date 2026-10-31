@@ -5,6 +5,9 @@
 ### Added
 - **Internet node.** An Internet globe sits just above the router. Each ping round also pings two public DNS servers (1.1.1.1 and 8.8.8.8). It turns red ("Internet down") when neither answers for two rounds in a row while the router still answers, and grey when the router isn't answering either. Comes with `sensor.netorbit_internet` and `netorbit_internet_down` / `netorbit_internet_up` events. On by default; turn it off under Settings ("Show the internet on the map"), or hide just the node with the card option `show_internet: false`.
 
+### Changed
+- Devices you placed by hand are easier to spot in Edit layout: their circle fills blue and gets a pin badge, while the outline keeps its green, yellow or red status. Before, it was a small blue dot.
+
 ### Fixed
 - You can change a hub's type from the card: in Edit layout, tap the hub and pick a Type (Switch, Access point, Mesh node or Hub). Before, the hub menu only offered rename and remove.
 - 0.2.7 could move a wireless device to the router after a restart, when the switch next to the router had forgotten it but a switch further down still listed it on its uplink. Only switches plugged straight into the router count as proof that a device is wired to the router now; otherwise the device keeps its last placement.
