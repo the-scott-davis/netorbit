@@ -125,7 +125,7 @@ function richModel(order) {
   const hubs = {
     "hub:gw": hub("hub:gw", "Kitchen Router", "router", null, "mdi:router-network"),
     "hub:sw": hub("hub:sw", "Basement Switch", "switch", "hub:gw", "mdi:switch"),
-    "hub:ap": hub("hub:ap", "Upstairs AP", "access_point", "hub:sw", "mdi:access-point"),
+    "hub:ap": hub("hub:ap", "Attic AP", "access_point", "hub:sw", "mdi:access-point"),
     __new: { key: "__new", label: "New devices", kind: "newhub", parent: "hub:gw", status: "new", icon: "mdi:tag-plus-outline" },
   };
   let i = 10;
@@ -146,7 +146,7 @@ function richModel(order) {
   if (order) devices = order(devices);
   return { hubs, devices, root: "hub:gw", summary: { attributes: { config_entry_id: "abc" } }, internet: { key: "internet", entity: "sensor.netorbit_internet", kind: "internet", label: "Internet", status: "online" }, suggestions: { X: {} }, sig: "x" };
 }
-const REAL = ["Kitchen Router", "Basement Switch", "Upstairs AP", "Living Room TV", "Bedroom TV", "Front Door Cam", "Garage Cam", "Office Laptop", "Kids Tablet", "esp-shed", "Strange Gadget", "Acme", "host-", ".lan", "sensor.netorbit", "abc"];
+const REAL = ["Kitchen Router", "Basement Switch", "Attic AP", "Living Room TV", "Bedroom TV", "Front Door Cam", "Garage Cam", "Office Laptop", "Kids Tablet", "esp-shed", "Strange Gadget", "Acme", "host-", ".lan", "sensor.netorbit", "abc"];
 const MAC_RE = /\b[0-9a-f]{2}([:-][0-9a-f]{2})+\b/i;
 
 function assertSafe(text, what) {
@@ -158,7 +158,7 @@ function assertSafe(text, what) {
 test("shareModel names devices by type, numbered per type by hub then name", () => {
   const m = card.shareModel(richModel());
   const byType = m.devices.map((d) => d.label);
-  // Basement Switch comes before Kitchen Router and Upstairs AP; within a hub, by name.
+  // Basement Switch comes before Kitchen Router and Attic AP; within a hub, by name.
   assert.deepStrictEqual(byType, ["Device 1", "Camera 1", "Laptop 1", "Device 2", "Tablet 1", "TV 1", "Camera 2", "TV 2"]);
   assert.strictEqual(m.title, "My home network");
   // The same network in another order gives the same names.
@@ -188,7 +188,7 @@ test("with names shown, labels stay but addresses still never do", () => {
   const m = card.shareModel(richModel(), { hideNames: false });
   const labels = m.devices.map((d) => d.label);
   assert.ok(labels.includes("Living Room TV") && labels.includes("Garage Cam"));
-  assert.ok(Object.values(m.hubs).some((h) => h.label === "Upstairs AP"));
+  assert.ok(Object.values(m.hubs).some((h) => h.label === "Attic AP"));
   // A device named after its address gets a generic name.
   assert.ok(!labels.some((l) => l.includes("192.0.2.") || MAC_RE.test(l)), labels.join(","));
   const svg = card.netorbitShareSvg(m, "Network");

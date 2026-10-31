@@ -20,8 +20,14 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
 
 ![NetOrbit card](docs/full.png)
 
+| Watch it find your network | Share your map |
+| --- | --- |
+| ![The first scan: a radar sweeps around the router, then every device pops in](docs/scan.gif) | ![A shared map with generic names and no addresses](docs/share.png) |
+
 ## What it does
 
+- **Watch the first scan happen.** Right after you add NetOrbit, the card shows a radar sweeping around your router with a live count of what it has found ("Scanning your network... found 12 devices") and what it's doing right now. When the scan is done, the map plays in: hubs and devices pop up as the beam passes them, the links draw in and the names fade in. Later scans just show a small *Scanning...* chip. If your device asks for less motion, the radar stays still and the map fades in instead. You can replay the animation from the Share menu any time.
+- **Share your map.** The *Share* button makes a picture of your map to download or copy, or a short video of the scan animation. Device names are hidden by default, so a TV shows up as "TV 1" and a camera as "Camera 2", and hubs only show their type. Turn names back on with one switch. IP and MAC addresses are never in what you share, and neither are devices waiting to be added or suggested hubs.
 - **Finds every device.** Sweeps your subnet, learns MAC addresses from the ARP table, and names devices from what your setup already knows: Home Assistant's device list, device trackers, Ping sensors you've set up, your router's local DNS, or the name the device announces over Bonjour. When nothing knows a name, it falls back to the maker (for example "Apple 28:54"), and you can rename it.
 - **Finds your network gear.** Spots routers, switches, access points and mesh nodes from who made them, what they call themselves, what they announce on the network, and what other integrations already know. Obvious ones are added for you. Likely ones show up with a spinning pink ring and a one-tap "It's a hub / Not a hub".
 - **Works out where each device connects, when your network will say:**
@@ -210,8 +216,9 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `hide_sleepy_offline` | `false` | Hide sleep-allowed devices while they're offline. |
 | `max_devices` | `80` | Above this many devices, each hub shows its problem devices first and folds the rest into a "+N more" bubble. |
 | `device_id` | | Only show one NetOrbit entry when you have several. |
+| `show_share` | `true` | Show the Share button (image or video of the map, with names hidden by default and no addresses). |
 
-Hover a device for details, tap it for its history. Admins get an **Edit layout** button.
+Hover a device for details, tap it for its history. Admins get an **Edit layout** button. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
@@ -269,7 +276,7 @@ Import either from **Settings > Automations & scenes > Blueprints > Import bluep
 
 ## Privacy
 
-NetOrbit runs on your network. The only thing it sends outside it is the internet check: a ping to `1.1.1.1` and `8.8.8.8` each round, which you can turn off under **Settings**. No data about your network goes with it. Maker names come from a list bundled with Home Assistant. Diagnostics downloads replace every IP, MAC and name with placeholders, so they're safe to attach to an issue. The card hides IPs by default.
+NetOrbit runs on your network. The only thing it sends outside it is the internet check: a ping to `1.1.1.1` and `8.8.8.8` each round, which you can turn off under **Settings**. No data about your network goes with it. Maker names come from a list bundled with Home Assistant. Diagnostics downloads replace every IP, MAC and name with placeholders, so they're safe to attach to an issue. The card hides IPs by default. Shared images and videos are made in your browser and never hold an IP or MAC address; with "Hide device names" on (the default) they hold no names either.
 
 ## Roadmap
 
