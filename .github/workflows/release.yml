@@ -11,7 +11,7 @@ jobs:
   zip:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check manifest version matches the tag
         run: |
           v=$(python3 -c "import json;print(json.load(open('custom_components/netorbit/manifest.json'))['version'])")
