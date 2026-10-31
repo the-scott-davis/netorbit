@@ -207,6 +207,134 @@ const assert = require("node:assert");
     await ip.close();
   }
 
+  // 12. The first scan: radar, a "Scanning N%" chip and a pill with what was found so far, instead of the
+  //     status chips, legend and buttons.
+  {
+    const sc = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    sc.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await sc.goto("http://localhost:8766/scripts/preview/index.html?s=firstscan");
+    await sc.waitForFunction(() => window.ready);
+    const c7 = sc.locator("netorbit-card");
+    assert.strictEqual((await c7.locator(".scanpill .l1").textContent()).trim(), "Scanning your network... found 12 devices");
+    assert.strictEqual((await c7.locator(".scanpill .l2").textContent()).trim(), "Pinging every address");
+    assert.strictEqual((await c7.locator(".head .scanchip").textContent()).trim(), "Scanning 30%");
+    assert.strictEqual(await c7.locator(".head .chip, .head .editbtn, .head .sharebtn").count(), 0, "status chips and buttons make way for the scan");
+    assert.strictEqual(await c7.locator(".legend").evaluate((e) => getComputedStyle(e).visibility), "hidden", "legend hidden while scanning");
+    assert.strictEqual(await c7.locator(".node.dev").count(), 0, "devices only arrive when the scan is done");
+    assert.ok(await c7.locator(".radar .beam").evaluate((e) => getComputedStyle(e).display !== "none"), "beam sweeps");
+    // The found count follows the sensor without redrawing the radar.
+    await sc.evaluate(() => {
+      const card = document.querySelector("netorbit-card");
+      const st = window.NETORBIT_SCENARIOS.firstscan;
+      card.shadowRoot.querySelector(".radar").dataset.mark = "same";
+      Object.assign(st["sensor.netorbit_devices_online"].attributes, { found: 21, scan_phase: "names", scan_progress: 55 });
+      card.hass = Object.assign({}, card._hass, { states: Object.assign({}, st) });
+    });
+    assert.strictEqual((await c7.locator(".scanpill .l1").textContent()).trim(), "Scanning your network... found 21 devices");
+    assert.strictEqual((await c7.locator(".scanpill .l2").textContent()).trim(), "Asking devices their names");
+    assert.strictEqual((await c7.locator(".head .scanchip").textContent()).trim(), "Scanning 55%");
+    assert.strictEqual(await c7.locator(".radar").getAttribute("data-mark"), "same", "progress updates in place");
+    console.log("first scan takeover ok");
+    await sc.close();
+
+    // Reduced motion: no beam, no pulses, the rings stay; words and progress still update.
+    const rm = await browser.newPage({ viewport: { width: 1008, height: 1100 }, reducedMotion: "reduce" });
+    await rm.goto("http://localhost:8766/scripts/preview/index.html?s=firstscan");
+    await rm.waitForFunction(() => window.ready);
+    const c8 = rm.locator("netorbit-card");
+    assert.strictEqual(await c8.locator(".radar .beam").evaluate((e) => getComputedStyle(e).display), "none", "no beam with reduced motion");
+    assert.strictEqual(await c8.locator(".radar .pr").first().evaluate((e) => getComputedStyle(e).display), "none", "no pulses with reduced motion");
+    assert.strictEqual(await c8.locator(".radar .st").count(), 3, "range rings stay");
+    assert.strictEqual(await c8.locator(".scanchip .rb").evaluate((e) => getComputedStyle(e).animationName), "none");
+    assert.ok((await c8.locator(".scanpill .l1").textContent()).includes("found 12"));
+    console.log("reduced motion ok");
+    await rm.close();
+
+    // A later scan: the normal map, plus a small chip before Edit layout.
+    const rs = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    await rs.goto("http://localhost:8766/scripts/preview/index.html?s=rescan");
+    await rs.waitForFunction(() => window.ready);
+    const c9 = rs.locator("netorbit-card");
+    assert.strictEqual((await c9.locator(".head .scanchip").textContent()).trim(), "Scanning...");
+    assert.ok(await c9.locator(".head .chip").count() >= 3, "status chips stay");
+    assert.ok(await c9.locator(".head .editbtn").isVisible(), "Edit layout stays");
+    assert.strictEqual(await c9.locator(".scanpill, .radar").count(), 0, "no takeover on a later scan");
+    assert.ok(await c9.locator(".head .scanchip + .sharebtn").count(), "chip sits before Share and Edit layout");
+    console.log("rescan chip ok");
+    await rs.close();
+
+    // The first scan finishes: the map plays in, then the normal header and legend come back.
+    const fin = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    fin.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await fin.goto("http://localhost:8766/scripts/preview/index.html?s=firstscan&finish=800");
+    await fin.waitForFunction(() => window.finished);
+    const c10 = fin.locator("netorbit-card");
+    assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "reveal plays when the first map arrives");
+    assert.ok((await c10.locator(".scanpill .l1").textContent()).startsWith("Found "));
+    await fin.waitForTimeout(4500);
+    assert.strictEqual(await c10.locator(".scanpill, .radar, .scanchip").count(), 0, "reveal cleaned up");
+    assert.ok(await c10.locator(".head .editbtn").isVisible() && await c10.locator(".legend").isVisible(), "normal header and legend are back");
+    assert.ok(await c10.locator(".node.dev").count() > 20, "devices on the map");
+    console.log("reveal ok");
+
+    // Replay it from the Share popup.
+    await c10.locator(".sharebtn").click();
+    await c10.locator(".sharepop .replay").click();
+    assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "replay plays the reveal");
+    await fin.waitForTimeout(4500);
+    assert.strictEqual(await c10.locator(".radar").count(), 0, "replay cleaned up");
+    console.log("replay ok");
+    await fin.close();
+  }
+
+  // 13. Share: an image with names hidden by default and never an address, and the scan as a video.
+  {
+    const sctx = await browser.newContext({ viewport: { width: 1008, height: 1100 }, acceptDownloads: true });
+    const sh = await sctx.newPage();
+    sh.setDefaultTimeout(8000);
+    sh.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await sh.goto("http://localhost:8766/scripts/preview/index.html?s=full");
+    await sh.waitForFunction(() => window.ready);
+    await sh.waitForTimeout(500);
+    const c11 = sh.locator("netorbit-card");
+    await c11.locator(".sharebtn").click();
+    assert.ok(await c11.locator(".sharepop").isVisible(), "Share opens");
+    assert.strictEqual(await c11.locator(".sharepop .tg").getAttribute("aria-checked"), "true", "names hidden by default");
+    const shared = () => c11.locator(".sharepop .thumb").evaluate((img) => decodeURIComponent(img.src.split(",").slice(1).join(",")));
+    const names = await sh.evaluate(() => Object.values(window.NETORBIT_SCENARIOS.full).map((s) => s.attributes.label).filter((l) => l && !/^(Router|Internet)$/.test(l)));
+    let svg = await shared();
+    assert.ok(svg.startsWith("<svg") && svg.includes("made with NetOrbit") && svg.includes("My home network"));
+    assert.ok(!svg.includes("192.0.2."), "no IP addresses in the shared image");
+    assert.ok(!/\b[0-9a-f]{2}([:-][0-9a-f]{2})+\b/i.test(svg), "no MAC addresses in the shared image");
+    const leaked = names.filter((n) => svg.includes(">" + n + "<"));
+    assert.deepStrictEqual(leaked, [], "no real names in the shared image");
+    assert.ok(svg.includes(">TV 1<") && svg.includes(">Access point<"), "generic names instead");
+    assert.ok(!svg.includes("New devices") && !svg.includes("esp-7c2d1a") && !svg.includes("Edit layout"), "no waiting devices, suggestions or buttons");
+    const [png] = await Promise.all([sh.waitForEvent("download"), c11.locator(".sharepop .dl").click()]);
+    const pngPath = await png.path();
+    const buf = require("fs").readFileSync(pngPath);
+    assert.strictEqual(buf.slice(1, 4).toString(), "PNG");
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+    assert.ok(buf.length > 50000 && buf.length < 12e6 && w >= 1000 && h >= 1000, `PNG ${w}x${h}, ${buf.length} bytes`);
+    console.log(`share PNG ok: ${png.suggestedFilename()} ${w}x${h} ${buf.length} bytes`);
+    await c11.locator(".sharepop .tg").click();
+    svg = await shared();
+    assert.ok(svg.includes(">Core Switch<") && svg.includes(">Bedroom TV<"), "names come back with the toggle off");
+    assert.ok(!svg.includes("192.0.2.") && !/\b[0-9a-f]{2}([:-][0-9a-f]{2})+\b/i.test(svg), "still no addresses with names shown");
+    await c11.locator(".sharepop .tg").click();
+    // Chromium can record a canvas: the Animation option is there and gives a video.
+    assert.ok(await c11.locator('.sharepop .seg button[data-m="video"]').isVisible(), "animation option offered");
+    await c11.locator('.sharepop .seg button[data-m="video"]').click();
+    const [vid] = await Promise.all([sh.waitForEvent("download", { timeout: 30000 }), c11.locator(".sharepop .rec").click()]);
+    const size = require("fs").statSync(await vid.path()).size;
+    assert.ok(size > 20000, `video has ${size} bytes`);
+    assert.ok(/^netorbit-scan\.(mp4|webm)$/.test(vid.suggestedFilename()), vid.suggestedFilename());
+    console.log(`share video ok: ${vid.suggestedFilename()} ${size} bytes`);
+    await c11.locator(".sharepop .x").click();
+    assert.strictEqual(await c11.locator(".sharepop").count(), 0, "popup closes");
+    await sctx.close();
+  }
+
   await browser.close();
   console.log("ALL INTERACTIONS PASSED");
 })().catch((e) => { console.error(e); process.exit(1); });
