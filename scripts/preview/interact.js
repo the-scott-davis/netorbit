@@ -105,7 +105,9 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   const c2 = phone.locator("netorbit-card");
   await c2.locator(".editbtn").click();
   const b = await c2.locator(`.node[data-key="${tv}"] circle.disc`).boundingBox();
-  await c2.locator(`.node[data-key="${tv}"] circle.disc`).tap();
+  // WebKit's own hit test of an SVG circle in a shadow root says <html> is in the way, so skip that check there;
+  // the touch still lands at the circle's centre and the menu must open.
+  await c2.locator(`.node[data-key="${tv}"] circle.disc`).tap({ force: IS_WEBKIT });
   assert.ok(await c2.locator(".pop select.hub").isVisible(), "tap opens the menu on a phone");
   console.log("phone tap ok, popup width", (await c2.locator(".pop").boundingBox()).width, "screen 390");
   // 8b. A flick: press, one move partway, release on the hub with no move there.
@@ -420,7 +422,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
     const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     await p.evaluate(() => document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)));
     const tvKey = await keyOfIn(p, "Bedroom TV");
-    await p.locator("netorbit-card").locator(`.node[data-key="${tvKey}"] circle.disc`).tap();
+    await p.locator("netorbit-card").locator(`.node[data-key="${tvKey}"] circle.disc`).tap({ force: true });
     assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
     console.log("phone tap ok (WebKit; swipe and pinch need Chrome's DevTools protocol and run in Chromium only)");
     await p.close();
