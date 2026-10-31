@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 import logging
@@ -96,6 +98,10 @@ DNS_REFRESH = timedelta(hours=12)
 NAME_LOOKUP_VERSION = 2
 AUTO_PLACEMENT_TTL = timedelta(days=7)
 SNMP_CONCURRENCY = 32
+
+# Sweep phases shown on the summary sensor while a scan runs, with a rough percentage for each.
+# "starting" is the moment between setup finishing and the background sweep taking over.
+SCAN_PHASES: dict[str, int] = {"starting": 0, "ping": 5, "arp": 40, "names": 50, "snmp": 70, "layout": 90}
 
 
 @dataclass
@@ -201,6 +207,11 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._tracker_names: dict[str, str] = {}
         self._ping_names: dict[str, str] = {}
         self.internal_update = False
+        # Setup sets this so its first refresh only pings what is already known; the sweep then
+        # runs in the background (see async_background_sweep).
+        self.defer_sweep = False
+        self.scan: dict[str, Any] = {"scanning": False, "phase": None, "progress": 0, "found": 0}
+        self._scan_listeners: list[Callable[[], None]] = []
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -209,6 +220,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         data = await self._store.async_load() or {}
         self._seen = data.get("seen", {})
         self._initialized = data.get("initialized", False)
+        # The hub tree from the last sweep, so the map looks the same after a restart while the
+        # first sweep is still running.
+        self._topology = Topology(hub_parent=dict(data.get("hub_parent") or {}))
         self._privileged = await self._detect_privileges()
 
     async def _detect_privileges(self) -> bool | None:
@@ -241,17 +255,70 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._force_probe = self._force_probe or probe
 
     def _save(self) -> None:
-        self._store.async_delay_save(lambda: {"seen": self._seen, "initialized": self._initialized}, 10)
+        self._store.async_delay_save(self._stored, 10)
+
+    def _stored(self) -> dict[str, Any]:
+        return {"seen": self._seen, "initialized": self._initialized, "hub_parent": self._topology.hub_parent}
+
+    async def async_shutdown(self) -> None:
+        """Write what NetOrbit knows right away on unload, so a reload starts from it."""
+        await super().async_shutdown()
+        await self._store.async_save(self._stored())
+
+    # ----- scan progress ---------------------------------------------------------
+
+    @property
+    def first_scan_done(self) -> bool:
+        """True once a full sweep has finished on this install. Saved, so it survives restarts."""
+        return self._initialized
+
+    @callback
+    def async_add_scan_listener(self, update: Callable[[], None]) -> Callable[[], None]:
+        """Call update when the scan progress changes. Returns a function that stops it."""
+        self._scan_listeners.append(update)
+
+        def remove() -> None:
+            if update in self._scan_listeners:
+                self._scan_listeners.remove(update)
+
+        return remove
+
+    @callback
+    def set_scan(self, notify: bool = True, **changes: Any) -> None:
+        """Update the scan progress. Only the summary sensor listens, and only a few times per sweep."""
+        if "phase" in changes and changes["phase"] in SCAN_PHASES:
+            changes.setdefault("progress", SCAN_PHASES[changes["phase"]])
+        self.scan.update(changes)
+        if notify:
+            for update in list(self._scan_listeners):
+                update()
+
+    async def async_background_sweep(self) -> None:
+        """The first sweep after setup. It runs once setup has finished, so Home Assistant's
+        startup doesn't wait for it, then refreshes the map with what it found."""
+        try:
+            await self._sweep(dt_util.utcnow())
+        except OSError as err:
+            _LOGGER.warning("NetOrbit: network scan failed: %s", err)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("NetOrbit: network scan failed")
+        # Draw what was found. If the scan failed, don't try again straight away: the regular
+        # update retries it.
+        self.defer_sweep = True
+        try:
+            await self.async_refresh()
+        finally:
+            self.defer_sweep = False
 
     # ----- update ------------------------------------------------------------
 
     async def _async_update_data(self) -> NetOrbitData:
         now = dt_util.utcnow()
-        sweep_due = (
-            self._force_sweep
-            or self._last_sweep is None
-            or now - self._last_sweep >= timedelta(seconds=self.opts[CONF_DISCOVERY_INTERVAL])
-        )
+        due = self._last_sweep is None or now - self._last_sweep >= timedelta(seconds=self.opts[CONF_DISCOVERY_INTERVAL])
+        # A sweep someone asked for always runs (after any sweep in progress). A sweep that is
+        # merely due waits while setup is running and while another sweep is still going, so the
+        # ping round keeps going in the meantime.
+        sweep_due = self._force_sweep or (due and not self.defer_sweep and not self._sweep_lock.locked())
         if self._privileged is None:
             raise UpdateFailed("ICMP sockets are not permitted on this system")
         try:
@@ -298,13 +365,15 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         """Ping every address, read ARP, then work out hubs and layout."""
         from icmplib import async_multiping  # noqa: PLC0415
 
-        async with self._sweep_lock:
+        async with self._sweep_lock, self._scanning():
             self._force_sweep = False
             hosts = subnet_hosts(self.subnet)
             results = await async_multiping(
                 hosts, count=1, timeout=SWEEP_TIMEOUT, concurrent_tasks=128, privileged=self._privileged
             )
             replied = {h.address for h in results if h.is_alive}
+            gateway = self.config_entry.data[CONF_GATEWAY]
+            self.set_scan(phase="arp", found=len(replied - {gateway}))
             arp = await self.hass.async_add_executor_job(_read_arp)
             ignored = set(self.opts[CONF_IGNORED])
             first_run = not self._initialized
@@ -342,12 +411,15 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if changed:
                 self._commit(opts)
 
+            # Everything that answered or that the router has an address for, apart from the router.
+            self.set_scan(phase="names", found=len((replied | set(mac_ip.values())) - {gateway}))
             await self._lookup_vendors()
             await self._resolve_names(now)
             self._registry = registry_by_mac(self.hass)
             self._tracker_names = tracker_names_by_mac(self.hass)
             self._ping_names = ping_names_by_ip(self.hass)
             if self.opts[CONF_SNMP_ENABLED]:
+                self.set_scan(phase="snmp")
                 await self._snmp_probe(now, replied | set(arp))
             await self._detect_hubs()
             if self.opts[CONF_SNMP_ENABLED] and self.opts.get(CONF_SNMP_COMMUNITY):
@@ -359,6 +431,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     await self._detect_hubs()
             # Read tables after detection so switches found in this sweep count straight away.
             self._tables = await self._read_tables() if self.opts[CONF_SNMP_ENABLED] else {}
+            self.set_scan(phase="layout")
             self._infer_layout(now)
 
             self._last_sweep = now
@@ -372,6 +445,18 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                         EVENT_NEW_DEVICE,
                         {"mac": rec.get("mac"), "ip": rec.get("ip"), "name": self._discovered_name(key, rec)},
                     )
+
+    @asynccontextmanager
+    async def _scanning(self) -> AsyncIterator[None]:
+        """Show a sweep as running on the summary sensor while it runs."""
+        self.set_scan(scanning=True, phase="ping", found=0)
+        try:
+            yield
+        except BaseException:
+            self.set_scan(scanning=False, phase=None)
+            raise
+        # The update that follows every sweep pushes this together with the new map.
+        self.set_scan(notify=False, scanning=False, phase=None, progress=100)
 
     def _follow_dhcp(self, opts: dict[str, Any], mac_ip: dict[str, str], arp: dict[str, str], now: datetime) -> bool:
         """Keep hubs and hand-added devices pointed at the right address when DHCP moves them.

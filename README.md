@@ -218,7 +218,7 @@ Hover a device for details, tap it for its history. Admins get an **Edit layout*
 ## Entities, events and services
 
 - One sensor per hub and tracked device. State is `online`, `recent` or `stale`. Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
-- `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`.
+- `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`. While a network scan runs it also shows `scanning: true`, the current `scan_phase` (`ping`, `arp`, `names`, `snmp`, `layout`), a rough `scan_progress` (0 to 100) and how many addresses it has `found` so far. `first_scan_done` turns true once the very first scan on this install has finished.
 - `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
 | Event | Data |

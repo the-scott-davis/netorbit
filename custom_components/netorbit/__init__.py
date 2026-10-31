@@ -128,10 +128,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: NetOrbitConfigEntry) -> 
     """Set up NetOrbit from a config entry."""
     coordinator = NetOrbitCoordinator(hass, entry)
     await coordinator.async_load()
-    await coordinator.async_config_entry_first_refresh()
+    # The first refresh draws the map from what NetOrbit saved and pings only those devices.
+    # The full network scan runs in the background once setup is done, so Home Assistant's
+    # startup doesn't wait for it.
+    coordinator.defer_sweep = True
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    finally:
+        coordinator.defer_sweep = False
+    coordinator.set_scan(notify=False, scanning=True, phase="starting")
     entry.runtime_data = coordinator
     entry.async_on_unload(entry.add_update_listener(_options_updated))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_create_background_task(hass, coordinator.async_background_sweep(), f"{DOMAIN} first network scan")
     return True
 
 
