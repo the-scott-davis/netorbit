@@ -74,6 +74,21 @@ test("devices are grouped by type from their icon", () => {
   assert.strictEqual(noGroupFor("mdi:lan-connect"), "other");
 });
 
+test("height takes pixels or a CSS length, and nothing that could leave the style block", () => {
+  const { noHeight } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+  assert.strictEqual(noHeight(1300), "1300px");
+  assert.strictEqual(noHeight("1300"), "1300px");
+  assert.strictEqual(noHeight(undefined), "900px");
+  assert.strictEqual(noHeight(""), "900px");
+  assert.strictEqual(noHeight(0), "900px");
+  assert.strictEqual(noHeight("calc(100vh - 180px)"), "calc(100vh - 180px)");
+  assert.strictEqual(noHeight("80vh"), "80vh");
+  assert.strictEqual(noHeight("min(1200px, 90vh)"), "min(1200px, 90vh)");
+  assert.strictEqual(noHeight("100px; } svg { display:none"), "900px");
+  assert.strictEqual(noHeight("1px</style><img src=x onerror=alert(1)>"), "900px");
+  assert.strictEqual(noHeight("url('x')"), "900px");
+});
+
 const BASE = { x: -70, y: -40, w: 1140, h: 1090 };
 const MIDDLE = { x: BASE.x + BASE.w / 2, y: BASE.y + BASE.h / 2 };
 const near = (a, b) => Math.abs(a - b) < 1e-9;
