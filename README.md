@@ -28,7 +28,7 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
   - **Managed switches with SNMP:** NetOrbit reads their MAC address tables and works out which switch port, and so which access point, every device is behind. No port mapping needed.
   - **UniFi**, and other integrations that report which access point each client uses (Netgear/Orbi's per-device "connected AP" sensors, for example).
 - **Lets you place the rest, three ways:**
-  1. **Drag and drop on the card.** Tap *Edit layout*, drag a device onto its hub, or tap it for *Move to*, *Make it a hub* and *Automatic*.
+  1. **Drag and drop on the card.** Tap *Edit layout*, drag a device onto its hub, or tap it for *Move to*, *Make it a hub* and *Automatic*. To move a hub (a switch from the router to an access point, say), tap the hub in Edit layout and pick *Connected to*.
   2. **Paste a client list.** Copy the client list from an access point's web page or a mesh app, paste it into NetOrbit, pick the hub. Done.
   3. **Ask an AI assistant.** NetOrbit exposes tools to Claude, ChatGPT and other assistants through Home Assistant's MCP Server, and to Assist. The assistant walks you through each piece of gear and does the placing. See [docs/ASSISTANT.md](docs/ASSISTANT.md).
 - **Looks good even when it knows nothing.** If no source reports the layout, devices are grouped by type (TV and media, computers and phones, cameras, smart home) until you place them.

@@ -1,12 +1,13 @@
-// Browser test of edit mode: node scripts/preview/interact.js (needs playwright and a server on :8766)
+// Browser test of edit mode: node scripts/preview/interact.js (needs playwright and a server on :8766, or set NETORBIT_PREVIEW to another base URL)
 const { chromium } = require("playwright");
 const assert = require("node:assert");
+const BASE = process.env.NETORBIT_PREVIEW || "http://localhost:8766";
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
   page.setDefaultTimeout(8000);
   page.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-  await page.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+  await page.goto(BASE + "/scripts/preview/index.html?s=novice");
   await page.waitForFunction(() => window.ready);
   const card = page.locator("netorbit-card");
   const center = async (sel) => {
@@ -97,7 +98,7 @@ const assert = require("node:assert");
   // 8. Touch: drag with a finger on a phone sized screen.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(8000);
-  await phone.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+  await phone.goto(BASE + "/scripts/preview/index.html?s=novice");
   await phone.waitForFunction(() => window.ready);
   const c2 = phone.locator("netorbit-card");
   await c2.locator(".editbtn").click();
@@ -108,7 +109,7 @@ const assert = require("node:assert");
   // 8b. A flick: press, one move partway, release on the hub with no move there.
   {
     const fl = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
-    await fl.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await fl.goto(BASE + "/scripts/preview/index.html?s=novice");
     await fl.waitForFunction(() => window.ready);
     const c4 = fl.locator("netorbit-card");
     await c4.locator(".editbtn").click();
@@ -135,7 +136,7 @@ const assert = require("node:assert");
   // 9. Drag still lands on a narrower card (tablets, side panels).
   for (const w of [760, 600]) {
     const nar = await browser.newPage({ viewport: { width: w, height: 1000 } });
-    await nar.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await nar.goto(BASE + "/scripts/preview/index.html?s=novice");
     await nar.waitForFunction(() => window.ready);
     const c3 = nar.locator("netorbit-card");
     await c3.locator(".editbtn").click();
@@ -153,7 +154,7 @@ const assert = require("node:assert");
   {
     const sp = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
     sp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-    await sp.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await sp.goto(BASE + "/scripts/preview/index.html?s=novice");
     await sp.waitForFunction(() => window.ready);
     const c5 = sp.locator("netorbit-card");
     await c5.locator(".editbtn").click();
@@ -188,7 +189,7 @@ const assert = require("node:assert");
   for (const [q, want] of [["", "online"], ["&internet=down", "stale"], ["&internet=off", null]]) {
     const ip = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
     ip.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-    await ip.goto("http://localhost:8766/scripts/preview/index.html?s=novice" + q);
+    await ip.goto(BASE + "/scripts/preview/index.html?s=novice" + q);
     await ip.waitForFunction(() => window.ready);
     const c6 = ip.locator("netorbit-card");
     const node = c6.locator('.node.inet[data-key="internet"]');
@@ -205,6 +206,42 @@ const assert = require("node:assert");
     }
     console.log(`internet ${want || "off"} ok`);
     await ip.close();
+  }
+
+  // 12. Move a hub under another hub with "Connected to" (move a switch from the router to an access point).
+  {
+    const hp = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    hp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await hp.goto(BASE + "/scripts/preview/index.html?s=full");
+    await hp.waitForFunction(() => window.ready);
+    const c7 = hp.locator("netorbit-card");
+    await c7.locator(".editbtn").click();
+    const opts = async () => c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.value).sort());
+    // The router has no parent to pick.
+    await c7.locator('.node.hub[data-key="hub:gateway"] circle.disc').click({ force: true });
+    assert.strictEqual(await c7.locator(".pop select.parent").count(), 0, "the router has no Connected to picker");
+    await c7.locator(".pop .x").click();
+    // A hub's own descendants are not offered, and neither is the hub itself.
+    await c7.locator('.node.hub[data-key="hub:core"] circle.disc').click({ force: true });
+    assert.deepStrictEqual(await opts(), ["gateway"], "a switch is offered only hubs that are not below it");
+    await c7.locator(".pop .x").click();
+    // Office Switch hangs off Core Switch. Move it under Hallway AP.
+    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    assert.ok((await c7.locator(".pop label", { hasText: "Connected to" }).count()) === 1, "picker is labelled Connected to");
+    assert.strictEqual(await c7.locator(".pop select.parent").inputValue(), "core", "current parent is selected");
+    assert.deepStrictEqual(await opts(), ["core", "down", "garage", "gateway", "up"], "every other real hub is offered, no group or New devices hub");
+    await c7.locator(".pop select.parent").selectOption("up");
+    await c7.locator(".pop .save").click();
+    const hc = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc.at(-1).slice(1), ["update_hub", { hub: "office", parent: "up", config_entry_id: "preview" }]);
+    // Saving without touching Connected to sends no parent.
+    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    await c7.locator(".pop input.name").fill("Desk Switch");
+    await c7.locator(".pop .save").click();
+    const hc2 = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc2.at(-1).slice(1), ["update_hub", { hub: "office", name: "Desk Switch", config_entry_id: "preview" }]);
+    console.log("hub parent picker ok:", JSON.stringify(hc.at(-1)[2]));
+    await hp.close();
   }
 
   await browser.close();
