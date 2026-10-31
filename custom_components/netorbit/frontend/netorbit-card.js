@@ -56,10 +56,12 @@ function noTrunc(s, n) {
 /** The map's max height: pixels, or a CSS length like "calc(100vh - 180px)". Anything else is 900px.
  * It lands in a <style> block, so only characters a length needs get through (no ; : { } < > or quotes). */
 function noHeight(v) {
+  if (typeof v === "boolean") return "900px";
   const n = Number(v);
   if (v !== "" && v != null && Number.isFinite(n)) return n > 0 ? `${n}px` : "900px";
   const s = String(v == null ? "" : v).trim();
   if (!/^[a-z0-9\s.,%()+*/-]+$/i.test(s)) return "900px";
+  if (s.indexOf("/*") !== -1 || s.indexOf("*/") !== -1) return "900px";
   if (typeof CSS !== "undefined" && CSS.supports && !CSS.supports("max-height", s)) return "900px";
   return s;
 }
