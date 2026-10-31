@@ -72,7 +72,7 @@ jobs:
           cat interact.log
           if [ $code -ne 0 ]; then
             # Put the end of the log in an annotation, which stays readable when the raw log is not at hand.
-            echo "::error title=interact.js failed::$(tail -n 14 interact.log | head -c 1500 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+            echo "::error title=interact.js failed::$(grep -v "^\s*[-0-9]* *[×-] \(waiting\|element\|scrolling\|done\|retrying\)" interact.log | tail -n 40 | head -c 5000 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
           fi
           exit $code
 
