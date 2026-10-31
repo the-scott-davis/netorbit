@@ -53,6 +53,17 @@ function noTrunc(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+/** The map's max height: pixels, or a CSS length like "calc(100vh - 180px)". Anything else is 900px.
+ * It lands in a <style> block, so only characters a length needs get through (no ; : { } < > or quotes). */
+function noHeight(v) {
+  const n = Number(v);
+  if (v !== "" && v != null && Number.isFinite(n)) return n > 0 ? `${n}px` : "900px";
+  const s = String(v == null ? "" : v).trim();
+  if (!/^[a-z0-9\s.,%()+*/-]+$/i.test(s)) return "900px";
+  if (typeof CSS !== "undefined" && CSS.supports && !CSS.supports("max-height", s)) return "900px";
+  return s;
+}
+
 /** Pure layout: returns positions for hubs and leaves. Exported for tests. */
 function netorbitLayout(model, opts) {
   const o = Object.assign({ cx: 500, cy: 500, rDev: 370, rHub1: 135, hubStep: 125, rHubMax: 290, rGroup: 245 }, opts || {});
@@ -514,7 +525,7 @@ class NetOrbitCard extends HTMLElement {
   .editbtn ha-icon { --mdc-icon-size:16px; }
   .banner { margin:6px 18px 0; padding:8px 12px; border-radius:8px; background:rgba(37,99,235,.15); border:1px solid rgba(96,165,250,.35); font-size:13px; color:#dbeafe; }
   .wrap { position:relative; touch-action:${edit ? "none" : "auto"}; }
-  svg { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); width:100%; height:auto; display:block; max-height:${Number(cfg.height) || 900}px; user-select:none; -webkit-user-select:none; }
+  svg { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); width:100%; height:auto; display:block; max-height:${noHeight(cfg.height)}; user-select:none; -webkit-user-select:none; }
   .ring { fill:none; stroke:rgba(148,163,184,.07); stroke-width:1; }
   .lk { fill:none; stroke-width:1.4; opacity:.45; }
   .lk.strong { stroke-width:2.6; opacity:.75; }
@@ -989,5 +1000,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");
