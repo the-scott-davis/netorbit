@@ -11,27 +11,54 @@ const TMP = path.join(__dirname, "_video");
 
 (async () => {
   fs.rmSync(TMP, { recursive: true, force: true });
+  fs.mkdirSync(TMP, { recursive: true });
   const browser = await chromium.launch();
-  const viewport = { width: 800, height: 880 };
-  const ctx = await browser.newContext({ viewport, recordVideo: { dir: TMP, size: viewport }, deviceScaleFactor: 1 });
+  // The GIF is drawn the same way the card's "Share > Animation" video is (netorbitPaintFrame), with the
+  // sample names shown. Every frame is painted at an exact time, so nothing is dropped or sped up the
+  // way a screen recording of a busy page is.
+  const FPS = 15;
+  const ctx = await browser.newContext({ viewport: { width: 1008, height: 1100 } });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-  const t0 = Date.now();
-  // The scan runs for 3.5 s, then the map plays in (about 4 s).
-  await page.goto("http://localhost:8766/scripts/preview/index.html?s=firstscan&finish=3500");
+  await page.goto("http://localhost:8766/scripts/preview/index.html?s=full");
   await page.waitForFunction(() => window.ready);
-  const start = (Date.now() - t0) / 1000 + 0.6; // icons settle
-  await page.waitForFunction(() => window.finished, null, { timeout: 15000 });
-  await page.waitForTimeout(5200);
-  const box = await page.locator("netorbit-card").boundingBox();
-  const dur = (Date.now() - t0) / 1000 - start;
-  const video = page.video();
+  await page.waitForTimeout(1200); // icons settle
+  const n = await page.evaluate((fps) => {
+    const card = document.querySelector("netorbit-card");
+    const smodel = shareModel(card._model(), { hideNames: false });
+    const D = netorbitDraw(smodel, { show_ip: false }, {});
+    const total = D.scene.nodes.filter((x) => !x.hub && x.k !== "internet").length;
+    const PRE = NO_REVEAL.turn;
+    const HOLD = 1.6;
+    const phases = ["ping", "arp", "names", "snmp", "layout"];
+    const frac = (t) => noClamp((t + PRE) / PRE);
+    const o = {
+      title: card._shareTitle(false), counts: noShareCounts(smodel),
+      pct: (t) => frac(t) * 100,
+      found: (t) => total * noEase(frac(t)),
+      phase: (t) => NO_SCAN_PHASE[phases[Math.min(phases.length - 1, Math.floor(frac(t) * phases.length))]],
+    };
+    const canvas = document.createElement("canvas");
+    canvas.width = 960;
+    canvas.height = Math.round((960 * NO_SHARE.h) / NO_SHARE.w / 2) * 2;
+    const c2 = canvas.getContext("2d");
+    const dur = PRE + NO_REVEAL.end + HOLD;
+    window.__frames = [];
+    const count = Math.round(dur * fps);
+    for (let i = 0; i < count; i++) {
+      netorbitPaintFrame(c2, D.scene, i / fps - PRE, o);
+      window.__frames.push(canvas.toDataURL("image/png"));
+    }
+    return count;
+  }, FPS);
+  for (let i = 0; i < n; i++) {
+    const url = await page.evaluate((k) => window.__frames[k], i);
+    fs.writeFileSync(path.join(TMP, `f${String(i).padStart(4, "0")}.png`), Buffer.from(url.split(",")[1], "base64"));
+  }
   await ctx.close();
-  const src = await video.path();
-  const crop = `crop=${Math.round(box.width)}:${Math.round(Math.min(box.height, viewport.height - box.y))}:${Math.round(box.x)}:${Math.round(box.y)}`;
-  const vf = `${crop},fps=10,scale=640:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=48:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle`;
-  execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", String(start), "-t", String(dur), "-i", src, "-vf", vf, "-loop", "0", path.join(OUT, "scan.gif")]);
-  console.log("docs/scan.gif", Math.round(fs.statSync(path.join(OUT, "scan.gif")).size / 1024), "KB");
+  const vf = "scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle";
+  execFileSync("ffmpeg", ["-v", "error", "-y", "-framerate", String(FPS), "-i", path.join(TMP, "f%04d.png"), "-vf", vf, "-loop", "0", path.join(OUT, "scan.gif")]);
+  console.log("docs/scan.gif", Math.round(fs.statSync(path.join(OUT, "scan.gif")).size / 1024), "KB,", n, "frames");
 
   // The share image exactly as the card's Download PNG makes it.
   const sctx = await browser.newContext({ viewport: { width: 1008, height: 1100 }, acceptDownloads: true });
@@ -46,5 +73,5 @@ const TMP = path.join(__dirname, "_video");
   execFileSync("ffmpeg", ["-v", "error", "-y", "-i", png, "-vf", "scale=900:-1:flags=lanczos", path.join(OUT, "share.png")]);
   console.log("docs/share.png", Math.round(fs.statSync(path.join(OUT, "share.png")).size / 1024), "KB");
   await browser.close();
-  fs.rmSync(TMP, { recursive: true, force: true });
+  if (!process.env.KEEP_FRAMES) fs.rmSync(TMP, { recursive: true, force: true });
 })().catch((e) => { console.error(e); process.exit(1); });
