@@ -875,17 +875,25 @@ class NetOrbitCard extends HTMLElement {
   }
 
   _hubPopup(n, ev, wrap, place, isRoot) {
+    const cur = NO_HUB_TYPE[n.hub_type] ? n.hub_type : "other";
+    const types = Object.entries(NO_HUB_TYPE).filter(([k]) => k !== "router" || isRoot)
+      .map(([k, v]) => `<option value="${k}" ${k === cur ? "selected" : ""}>${v}</option>`).join("");
     const pop = this._openPop(
       `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(NO_HUB_TYPE[n.hub_type] || "Hub")}</div>` +
       `<label>Name<input class="name" value="${noEsc(n.label)}"></label>` +
+      (isRoot ? "" : `<label>Type<select class="type">${types}</select></label>`) +
       `<div class="row"><button class="go save">Save</button>${isRoot ? "" : `<button class="warn rm">Remove</button>`}<button class="x">Close</button></div>`,
-      ev, wrap, place, 250, 160
+      ev, wrap, place, 250, isRoot ? 160 : 210
     );
     const q = (s) => pop.querySelector(s);
     q(".save").addEventListener("click", () => {
       const name = q(".name").value.trim();
+      const type = q(".type") ? q(".type").value : cur;
       this._closePop(wrap);
-      if (name && name !== n.label) this._call("update_hub", { hub: n.key.replace(/^hub:/, ""), name });
+      const data = { hub: n.key.replace(/^hub:/, "") };
+      if (name && name !== n.label) data.name = name;
+      if (type !== cur) data.type = type;
+      if (data.name || data.type) this._call("update_hub", data);
     });
     if (q(".rm")) q(".rm").addEventListener("click", () => { this._closePop(wrap); this._call("remove_hub", { hub: n.key.replace(/^hub:/, "") }); });
   }

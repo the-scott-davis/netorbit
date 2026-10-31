@@ -67,6 +67,14 @@ const assert = require("node:assert");
   assert.deepStrictEqual(calls.at(-1).slice(1), ["update_hub", { hub: "m1", name: "Upstairs Node", config_entry_id: "preview" }]);
   console.log("rename ok");
 
+  // 5b. Change a hub's type (a Wi-Fi extender that was added as a plain hub, say).
+  await card.locator('.node.hub[data-key="hub:m1"]').click();
+  await card.locator(".pop select.type").selectOption("access_point");
+  await card.locator(".pop .save").click();
+  calls = await page.evaluate(() => window.calls);
+  assert.deepStrictEqual(calls.at(-1).slice(1), ["update_hub", { hub: "m1", type: "access_point", config_entry_id: "preview" }]);
+  console.log("hub type ok");
+
   // 6. Leave edit mode, confirm the suggested hub.
   await card.locator(".editbtn").click();
   const sugKey = await page.evaluate(() => "sug:" + window.NETORBIT_SCENARIOS.novice["sensor.netorbit_devices_online"].attributes.suggested_hubs[0].key);
