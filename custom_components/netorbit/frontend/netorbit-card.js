@@ -1981,12 +1981,20 @@ class NetOrbitCard extends HTMLElement {
   }
 
   _openPop(html, ev, wrap, place, w = 250, h = 200) {
-    this._closePop(wrap);
+    // Swap a popup that is already open for this one without redrawing the map. _closePop
+    // redraws, which replaces the shadow DOM: the new popup would then be appended to the old,
+    // detached tree while _popOpen stays set, and the card would stop updating until a reload.
+    const old = wrap.querySelector(".pop");
+    if (old) old.remove();
     const pop = document.createElement("div");
     pop.className = "pop";
     pop.innerHTML = html;
     wrap.appendChild(pop);
     place(pop, ev, w, h);
+    // place() works from an estimated size; a taller popup (details, long fields) is pulled back inside the map.
+    const pr = pop.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    if (pr.bottom > wr.bottom) pop.style.top = Math.max(4, wr.height - pr.height - 4) + "px";
+    if (pr.right > wr.right) pop.style.left = Math.max(4, wr.width - pr.width - 4) + "px";
     this._popOpen = true;
     pop.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => this._closePop(wrap)));
     return pop;
