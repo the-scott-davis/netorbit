@@ -97,27 +97,6 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   assert.ok(opened && opened.startsWith("sensor.netorbit_"), "tap opens details");
   console.log("more-info ok:", opened);
 
-  // DIAG (temporary): does a phone tap reach the node, with zoom on and off?
-  for (const cfg of [{ zoom: false }, {}]) {
-    const dp = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    await dp.goto("http://localhost:8766/scripts/preview/index.html?s=novice&cfg=" + encodeURIComponent(JSON.stringify(cfg)));
-    await dp.waitForFunction(() => window.ready);
-    const dc = dp.locator("netorbit-card");
-    await dc.locator(".editbtn").click();
-    await dp.evaluate(() => {
-      window.ev = [];
-      ["touchstart", "touchend", "pointerdown", "pointerup", "pointercancel", "click"].forEach((t) =>
-        document.addEventListener(t, (e) => window.ev.push(t + ":" + (e.composedPath()[0].tagName || "?") + (e.pointerType ? "/" + e.pointerType : "")), true));
-    });
-    const dk = await dp.evaluate(() => Object.values(window.NETORBIT_SCENARIOS.novice).find((x) => x.attributes.label === "Bedroom TV").attributes.node_key);
-    const bb2 = await dc.locator(`.node[data-key="${dk}"] circle.disc`).boundingBox();
-    const vv = await dp.evaluate(() => [innerWidth, document.documentElement.clientWidth, visualViewport.scale, scrollX]);
-    await dp.touchscreen.tap(bb2.x + bb2.width / 2, bb2.y + bb2.height / 2);
-    await dp.waitForTimeout(400);
-    console.log("::notice title=diag::DIAG", JSON.stringify(cfg), "box", Math.round(bb2.x), Math.round(bb2.y), "vp", JSON.stringify(vv), "pop", await dc.locator(".pop").count(), "events", (await dp.evaluate(() => window.ev)).join(" "));
-    await dp.close();
-  }
-
   // 8. Touch: drag with a finger on a phone sized screen.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(8000);
@@ -126,9 +105,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   const c2 = phone.locator("netorbit-card");
   await c2.locator(".editbtn").click();
   const b = await c2.locator(`.node[data-key="${tv}"] circle.disc`).boundingBox();
-  // WebKit's own hit test of an SVG circle in a shadow root says <html> is in the way, so skip that check there;
-  // the touch still lands at the circle's centre and the menu must open.
-  await c2.locator(`.node[data-key="${tv}"] circle.disc`).tap({ force: IS_WEBKIT });
+  await c2.locator(`.node[data-key="${tv}"] circle.disc`).tap();
   assert.ok(await c2.locator(".pop select.hub").isVisible(), "tap opens the menu on a phone");
   console.log("phone tap ok, popup width", (await c2.locator(".pop").boundingBox()).width, "screen 390");
   // 8b. A flick: press, one move partway, release on the hub with no move there.
@@ -443,7 +420,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
     const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     await p.evaluate(() => document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)));
     const tvKey = await keyOfIn(p, "Bedroom TV");
-    await p.locator("netorbit-card").locator(`.node[data-key="${tvKey}"] circle.disc`).tap({ force: true });
+    await p.locator("netorbit-card").locator(`.node[data-key="${tvKey}"] circle.disc`).tap();
     assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
     console.log("phone tap ok (WebKit; swipe and pinch need Chrome's DevTools protocol and run in Chromium only)");
     await p.close();
