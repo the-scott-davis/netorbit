@@ -202,7 +202,7 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | Option | Default | Description |
 | --- | --- | --- |
 | `title` | `Network` | Card title. |
-| `height` | `900` | Maximum height in pixels. |
+| `height` | `900` | Maximum height: pixels, or a CSS length. `calc(100vh - 180px)` fills the window below the header on any screen. |
 | `show_ip` | `false` | Show hub IPs under their names instead of the hub type. Off by default so screenshots are safe to share. |
 | `show_legend` | `true` | Show the legend at the bottom. |
 | `show_internet` | `true` | Show the Internet node above the router (needs the internet check turned on in the integration's settings). |
