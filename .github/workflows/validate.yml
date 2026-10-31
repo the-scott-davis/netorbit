@@ -39,6 +39,43 @@ jobs:
           node-version: "22"
       - run: node --test tests/card.test.js
 
+  browser:
+    name: Browser tests (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install Playwright and the icon set the preview uses
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.63.0 @mdi/js@7.4.47
+          cp node_modules/@mdi/js/mdi.js scripts/preview/mdi.js
+      - name: Install the browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Serve the repository
+        run: |
+          python3 -m http.server 8766 > /dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8766/scripts/preview/index.html > /dev/null && break; sleep 1; done
+      - name: Edit layout, zoom and touch in ${{ matrix.browser }}
+        run: |
+          set +e
+          BROWSER=${{ matrix.browser }} node scripts/preview/interact.js > interact.log 2>&1
+          code=$?
+          cat interact.log
+          if [ $code -ne 0 ]; then
+            # Put the end of the log in an annotation, which stays readable when the raw log is not at hand.
+            echo "::error title=interact.js failed::$(grep -v "^\s*[-0-9]* *[×-] \(waiting\|element\|scrolling\|done\|retrying\)" interact.log | tail -n 40 | head -c 5000 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+          fi
+          exit $code
+
   examples:
     runs-on: ubuntu-latest
     steps:
