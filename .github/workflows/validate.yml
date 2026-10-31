@@ -10,7 +10,7 @@ jobs:
   hacs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: hacs/action@main
         with:
           category: integration
@@ -18,14 +18,14 @@ jobs:
   hassfest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: home-assistant/actions/hassfest@master
 
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: pip install -r requirements_test.txt
@@ -34,7 +34,7 @@ jobs:
           # Read the manifest as a file: importing the conversation package needs these very requirements.
           pip install $(python -c "import json, pathlib, importlib.util; root = pathlib.Path(importlib.util.find_spec('homeassistant').origin).parent; print(' '.join(json.loads((root / 'components' / 'conversation' / 'manifest.json').read_text())['requirements']))")
       - run: pytest -q
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - run: node --test tests/card.test.js
@@ -42,14 +42,14 @@ jobs:
   examples:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: No real network addresses in code, tests or docs
         run: python3 scripts/check_examples.py
 
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Scan the full history for secrets
