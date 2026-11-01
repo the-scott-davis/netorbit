@@ -9,6 +9,9 @@
 ### Added
 - Scan progress on `sensor.netorbit_devices_online`: `scanning`, `scan_phase`, `scan_progress`, `found` and `first_scan_done`. They change a few times per scan, for the first scan and for the regular ones, and stay out of the history database (`first_scan_done` aside).
 
+### Fixed
+- Hubs with no IP (an unmanaged switch, or an access point in bridge mode) no longer turn red once the "not seen" window passes. NetOrbit can't ping them, so they now take their status from the devices behind them: green while anything behind them answers, red only once nothing behind them has been seen for the window, grey when nothing is behind them. Before, they went red (and fired `netorbit_device_stale`) a day after being added, whatever was behind them.
+
 ## 0.2.8
 
 ### Added
