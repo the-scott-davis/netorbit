@@ -22,8 +22,11 @@ GRANDSTREAM_OID_PREFIX = "1.3.6.1.4.1.42397"
 OID_GWN_CLIENT_MAC = "1.3.6.1.4.1.42397.1.1.3.3.1.1"  # gwnClientMACAddress, also the table index
 OID_GWN_CLIENT_IP = "1.3.6.1.4.1.42397.1.1.3.3.1.2"  # gwnClientIPAddress, same index
 
+_ENTERPRISES_NAME = "SNMPv2-SMI::enterprises."
+
 PROBE_TIMEOUT = 1.0
 WALK_TIMEOUT = 2.0
+WALK_DEADLINE = 15.0  # a whole client table walk; WALK_TIMEOUT only bounds one request
 MAX_TABLE = 4096
 
 
@@ -40,6 +43,9 @@ class ProbeResult:
 def is_grandstream(object_id: str | None, descr: str | None = None) -> bool:
     """True for a Grandstream device, by its sysObjectID or, failing that, its description."""
     oid = (object_id or "").strip().lstrip(".")
+    if oid.startswith(_ENTERPRISES_NAME):
+        # pysnmp prints known prefixes by name: SNMPv2-SMI::enterprises.42397.1.1
+        oid = "1.3.6.1.4.1." + oid[len(_ENTERPRISES_NAME) :]
     if oid == GRANDSTREAM_OID_PREFIX or oid.startswith(GRANDSTREAM_OID_PREFIX + "."):
         return True
     return "grandstream" in (descr or "").lower()
@@ -62,7 +68,10 @@ def parse_mac(value: Any) -> str | None:
         except Exception:  # noqa: BLE001
             return None
     elif isinstance(value, str):
-        raw = value.encode("utf-8", "ignore")
+        text = value.strip().lower()
+        if not text.isascii():
+            return None
+        return _mac_from_text(text)
     if raw is None:
         return None
     if len(raw) == 6:
@@ -71,6 +80,11 @@ def parse_mac(value: Any) -> str | None:
         text = raw.decode("ascii").strip().lower()
     except UnicodeDecodeError:
         return None
+    return _mac_from_text(text)
+
+
+def _mac_from_text(text: str) -> str | None:
+    """A MAC from lowercase ASCII text in colon, dash, dot or bare hex form."""
     if text.startswith("0x"):
         text = text[2:]
     text = re.sub(r"[\s:.\-]", "", text)
@@ -122,11 +136,13 @@ class SnmpClient:
         if err_ind or err_stat:
             return None
         values = [_value(v) for _n, v in binds]
-        descr, name, ports, object_id = (values + [None, None, None, None])[:4]
+        descr, name, ports, _ = (values + [None, None, None, None])[:4]
+        # pysnmp prints a sysObjectID under a known prefix by name, so take the numbers from it.
+        object_id = _oid_text(binds[3][1]) if len(binds) > 3 else None
         bridge = isinstance(ports, int) and ports > 0
         return ProbeResult(
             descr=str(descr) if descr else None, name=str(name) if name else None, bridge=bridge,
-            object_id=str(object_id) if object_id else None,
+            object_id=object_id or None,
         )
 
     async def mac_table(self, host: str, community: str) -> dict[str, int] | None:
@@ -147,12 +163,19 @@ class SnmpClient:
         """
         if not await self._ensure():
             return None
-        found = await self._walk_gwn(host, community, OID_GWN_CLIENT_MAC)
-        if found is None:
+        try:
+            # WALK_TIMEOUT only bounds one request, so a slow AP answering a row at a time could
+            # hold the whole scan; the deadline covers the walk as a whole.
+            async with asyncio.timeout(WALK_DEADLINE):
+                found = await self._walk_gwn(host, community, OID_GWN_CLIENT_MAC)
+                if found is None:
+                    return None
+                if not found:
+                    found = await self._walk_gwn(host, community, OID_GWN_CLIENT_IP)
+                return found
+        except TimeoutError:
+            _LOGGER.debug("SNMP client walk of %s took longer than %ss", host, WALK_DEADLINE)
             return None
-        if not found:
-            found = await self._walk_gwn(host, community, OID_GWN_CLIENT_IP)
-        return found
 
     async def _walk_gwn(self, host: str, community: str, base: str) -> set[str] | None:
         m = self._mod
@@ -228,6 +251,18 @@ def _load():
     engine.cache["mibViewController"] = controller
     controller.mibBuilder.load_modules()
     return mod, engine
+
+
+def _oid_text(val: Any) -> str | None:
+    """A sysObjectID value as dotted numbers (1.3.6.1.4.1...), or None."""
+    try:
+        get_oid = getattr(val, "get_oid", None) or getattr(val, "asTuple", None)
+        if get_oid is None:
+            return None
+        parts = get_oid()
+        return ".".join(str(int(x)) for x in parts) or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _value(val: Any) -> Any:

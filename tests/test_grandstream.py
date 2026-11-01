@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -77,7 +78,8 @@ def test_parse_mac_forms() -> None:
     for value in (raw, bytearray(raw), Octets(raw), "00:00:5E:00:53:06", "00-00-5e-00-53-06", "00005e005306", "0x00005e005306",
                   "00:00:5e:00:53:06 ", Octets(b"00:00:5e:00:53:06")):
         assert parse_mac(value) == AP_MAC, value
-    for bad in (None, b"", b"\x00\x01", "not a mac", "00:00:5e", 12, Octets(b"\xff\xfe\xfd\xfc\xfb\xfa\xf9")):
+    for bad in (None, b"", b"\x00\x01", "not a mac", "00:00:5e", 12, Octets(b"\xff\xfe\xfd\xfc\xfb\xfa\xf9"),
+                "abcdef", "192.01", "caf\u00e9:00:5e:00:53:06"):  # 6 characters of text are not 6 raw bytes
         assert parse_mac(bad) is None, bad
 
 
@@ -85,6 +87,9 @@ def test_is_grandstream() -> None:
     assert is_grandstream(f"{GRANDSTREAM_OID_PREFIX}.1.1")
     assert is_grandstream(f".{GRANDSTREAM_OID_PREFIX}")
     assert is_grandstream(None, "Grandstream GWN7660")
+    # pysnmp prints a sysObjectID under a known prefix by name
+    assert is_grandstream("SNMPv2-SMI::enterprises.42397.1.1", "Linux GWN7660 4.4")
+    assert not is_grandstream("SNMPv2-SMI::enterprises.423970.1.1")
     assert not is_grandstream("1.3.6.1.4.1.423970.1")  # a different enterprise that merely starts with the digits
     assert not is_grandstream("1.3.6.1.4.1.41112.1.6", "UniFi AP")
 
@@ -191,3 +196,99 @@ async def test_other_vendors_are_not_asked_for_a_client_table(hass: HomeAssistan
     await _setup(hass, entry)
     await entry.runtime_data.async_refresh()
     assert _node_states(hass)["phone"].attributes["placement"] == "none"
+
+
+class Oid:
+    """Stands in for the value pysnmp returns for sysObjectID: it prints by name, get_oid() has the numbers."""
+
+    def __init__(self, numbers: str) -> None:
+        self._numbers = tuple(int(x) for x in numbers.split("."))
+
+    def get_oid(self) -> tuple[int, ...]:
+        return self._numbers
+
+    def __str__(self) -> str:
+        return "SNMPv2-SMI::enterprises." + ".".join(str(x) for x in self._numbers[7:])
+
+
+async def test_probe_reads_the_sys_object_id_as_numbers() -> None:
+    """Against real pysnmp the sysObjectID prints as SNMPv2-SMI::enterprises.42397...; the probe keeps the numbers."""
+
+    async def get_cmd(*_a):
+        binds = [(None, "Linux"), (None, "ap-1"), (None, None), (None, Oid("1.3.6.1.4.1.42397.1.1"))]
+        return None, 0, 0, binds
+
+    mod = SimpleNamespace(
+        get_cmd=get_cmd, ObjectType=lambda i: i, ObjectIdentity=lambda o: o, CommunityData=lambda *a, **k: None,
+        ContextData=lambda: None, UdpTransportTarget=SimpleNamespace(create=lambda *a, **k: _done(object())),
+    )
+    client = SnmpClient(hass=None)
+    client._mod, client._engine = mod, object()
+    res = await client.probe(AP_IP, "public")
+    assert res is not None and res.object_id == f"{GRANDSTREAM_OID_PREFIX}.1.1"
+    assert is_grandstream(res.object_id, res.descr)
+
+
+async def _done(value):
+    return value
+
+
+async def test_slow_walk_is_cut_off_by_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An AP that answers one row at a time must not hold the scan: the whole walk has a deadline."""
+    monkeypatch.setattr("custom_components.netorbit.snmp.WALK_DEADLINE", 0.05)
+    client = _client({})
+
+    async def trickle(_engine, _comm, _target, _ctx, _nr, _mr, objtype, lexicographicMode=False):  # noqa: N803
+        while True:
+            await asyncio.sleep(0.02)
+            yield None, 0, 0, [_row(PHONE_MAC, Octets(bytes.fromhex("00005e005340")))]
+
+    client._mod.bulk_walk_cmd = trickle
+    assert await asyncio.wait_for(client.wireless_clients(AP_IP, "public"), 2) is None
+
+
+async def test_row_index_with_a_length_prefix_still_gives_the_mac() -> None:
+    """An OCTET STRING index without a fixed size is length prefixed (7 sub-ids): the MAC is its last 6."""
+    row = (_tuple(OID_GWN_CLIENT_MAC) + (6,) + _mac_tuple(PHONE_MAC), Octets(b""))
+    assert await _client({OID_GWN_CLIENT_MAC: [row]}).wireless_clients(AP_IP, "public") == {PHONE_MAC}
+    assert await _client({OID_GWN_CLIENT_MAC: [(_tuple(OID_GWN_CLIENT_MAC) + (7, 8), Octets(b""))]}).wireless_clients(AP_IP, "public") == set()
+
+
+async def test_table_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("custom_components.netorbit.snmp.MAX_TABLE", 3)
+    rows = [_row(f"00:00:5e:00:54:{i:02x}", Octets(b"")) for i in range(10)]
+    assert len(await _client({OID_GWN_CLIENT_MAC: rows}).wireless_clients(AP_IP, "public")) == 3
+
+
+async def test_ap_listing_its_own_and_the_routers_mac_adds_no_devices(hass: HomeAssistant, fake_net) -> None:
+    _network(fake_net)
+    fake_net.wifi = {AP_IP: {PHONE_MAC, AP_MAC, GW_MAC}}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    nodes = _node_states(hass)
+    assert nodes["phone"].attributes["placement"] == "snmp"
+    devices = [n for n in nodes.values() if n.attributes["kind"] == "device"]
+    assert {n.attributes["mac"].lower() for n in devices} == {PHONE_MAC, LAPTOP_MAC}
+
+
+async def test_device_plugged_into_the_switch_is_not_pulled_onto_the_ap(hass: HomeAssistant, fake_net) -> None:
+    """A laptop the AP still lists, but that a managed switch sees on its own edge port, is wired."""
+    _network(fake_net)
+    fake_net.alive.add("192.0.2.2")
+    fake_net.arp["192.0.2.2"] = "00:00:5e:00:53:02"
+    fake_net.dns["192.0.2.2"] = "core-switch.lan"
+    fake_net.snmp["192.0.2.2"] = ("public", ProbeResult(descr="8-port managed switch", name="core-switch", bridge=True))
+    # Port 6 faces the AP, port 3 is an edge port. The AP lists both the phone and the docked laptop.
+    fake_net.tables = {"192.0.2.2": {GW_MAC: 1, AP_MAC: 6, PHONE_MAC: 6, LAPTOP_MAC: 3}}
+    fake_net.wifi = {AP_IP: {PHONE_MAC, LAPTOP_MAC}}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    nodes = _node_states(hass)
+    ap = next(h["id"] for h in entry.options["hubs"] if h["name"] == "ap-1")
+    sw = next(h["id"] for h in entry.options["hubs"] if h["name"] == "core-switch")
+    assert nodes["phone"].attributes["link"] == f"hub:{ap}"
+    assert nodes["laptop"].attributes["link"] == f"hub:{sw}"

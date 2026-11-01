@@ -688,17 +688,36 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
     async def _read_ap_clients(self) -> dict[str, str]:
         """Read the Wi-Fi client list from every Grandstream access point hub: {client mac: hub id}."""
-        out: dict[str, str] = {}
+        asked: list[tuple[str, str, str]] = []
         for hub in self.opts[CONF_HUBS]:
             host = hub.get("host")
             info = self._snmp_info(hub)
             if not host or not info or info.get("bridge") or not is_grandstream(info.get("object_id"), info.get("descr")):
                 continue
             comm = self._communities()[0] if info.get("community") == "custom" else SNMP_DEFAULT_COMMUNITY
-            clients = await self._snmp.wireless_clients(host, comm)
-            for mac in clients or ():
-                out.setdefault(mac, hub["id"])
+            asked.append((hub["id"], host, comm))
+        # Ask all the access points at once so a slow one does not hold up the others.
+        results = await asyncio.gather(*(self._snmp.wireless_clients(host, comm) for _id, host, comm in asked), return_exceptions=True)
+        out: dict[str, str] = {}
+        for (hub_id, _host, _comm), clients in zip(asked, results):
+            for mac in (clients if isinstance(clients, set) else ()):
+                out.setdefault(mac, hub_id)
         return out
+
+    def _wired_elsewhere(self, mac: str, ap_hub: str) -> bool:
+        """True when a switch sees this MAC on a different port than the access point that lists it.
+
+        A client really on the AP's Wi-Fi shows up on the same switch port as the AP. A device
+        on a switch's own port is plugged in, even if the AP still lists it a while after it
+        left the Wi-Fi (a laptop that was just docked)."""
+        ap_mac = self._hub_macs().get(ap_hub)
+        if not ap_mac:
+            return False
+        for table in self._tables.values():
+            dev_port, ap_port = table.get(mac), table.get(ap_mac)
+            if dev_port and ap_port and dev_port != ap_port:
+                return True
+        return False
 
     def _snmp_info(self, hub: dict[str, Any]) -> dict[str, Any] | None:
         info = (self._seen.get(f"hub:{hub['id']}") or {}).get("snmp")
@@ -832,7 +851,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             rec["auto"] = {"hub": hub, "source": PLACE_CONTROLLER, "at": now.isoformat()}
             return hub, PLACE_CONTROLLER
         ap_hub = self._ap_clients.get(mac) if mac else None
-        if ap_hub:
+        if ap_hub and not self._wired_elsewhere(mac, ap_hub):
             rec["auto"] = {"hub": ap_hub, "source": PLACE_SNMP, "at": now.isoformat()}
             return ap_hub, PLACE_SNMP
         auto = rec.get("auto")
