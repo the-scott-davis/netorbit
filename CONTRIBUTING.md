@@ -36,7 +36,7 @@ node --test tests/card.test.js
 python scripts/check_examples.py
 ```
 
-For card changes, preview the card with fake data: `npm i @mdi/js@7.4.47`, copy `node_modules/@mdi/js/mdi.js` to `scripts/preview/`, serve the repo root (`python -m http.server 8766`), and open `http://localhost:8766/scripts/preview/index.html?s=full` (or `mesh`, `flat`, `novice`). `node scripts/preview/interact.js` drives edit mode in a real browser with Playwright.
+For card changes, preview the card with fake data: `npm i @mdi/js@7.4.47`, copy `node_modules/@mdi/js/mdi.js` to `scripts/preview/`, serve the repo root (`python -m http.server 8766`), and open `http://localhost:8766/scripts/preview/index.html?s=full` (or `mesh`, `flat`, `novice`). `node scripts/preview/interact.js` drives edit mode in a real browser with Playwright (set `NETORBIT_PREVIEW` if the server is not on port 8766).
 
 The README describes the network simulator (`tests/test_simulation.py`), which checks placement across hundreds of generated networks. Run it if you touch how devices are found or placed.
 
