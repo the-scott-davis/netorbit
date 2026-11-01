@@ -133,6 +133,13 @@ class HA:
                 raise RuntimeError(f"POST {path} returned {r.status}: {body[:500]}")
             return json.loads(body) if body else None
 
+    async def delete(self, path: str):
+        async with self.s.delete(self.url + path, headers=self._headers()) as r:
+            body = await r.text()
+            if r.status >= 400:
+                raise RuntimeError(f"DELETE {path} returned {r.status}: {body[:500]}")
+            return json.loads(body) if body else None
+
     async def wait_up(self, timeout: float) -> list:
         """Wait until the onboarding API answers (the frontend and http are up by then)."""
         deadline = time.monotonic() + timeout
@@ -405,28 +412,85 @@ CARD_STATE_JS = """(card) => {
 }"""
 
 
+async def logged_in_page(browser, ha: HA):
+    """A page logged in to Home Assistant, plus the console messages and page errors it collects."""
+    context = await browser.new_context(viewport={"width": 1280, "height": 1100})
+    tokens = {
+        "access_token": ha.token,
+        "token_type": "Bearer",
+        "expires_in": ha.tokens.get("expires_in", 1800),
+        "refresh_token": ha.tokens.get("refresh_token"),
+        "expires": int(time.time() * 1000) + int(ha.tokens.get("expires_in", 1800)) * 1000,
+        "hassUrl": ha.url,
+        "clientId": ha.client_id,
+    }
+    # Log the browser in the same way the frontend remembers a login: tokens in localStorage.
+    await context.add_init_script(f"window.localStorage.setItem('hassTokens', {json.dumps(json.dumps(tokens))});")
+    page = await context.new_page()
+    console: list[tuple[str, str]] = []
+    page_errors: list[str] = []
+    page.on("console", lambda m: console.append((m.type, m.text)))
+    page.on("pageerror", lambda e: page_errors.append(f"{e.name}: {e.message}\n{e.stack or ''}"))
+    return page, console, page_errors
+
+
+# Opens the card's Share popup and reads the image it would share (the preview is the exported SVG itself).
+SHARE_JS = """async (card) => {
+  const root = card.shadowRoot;
+  const btn = root.querySelector(".sharebtn");
+  if (!btn) return { button: false };
+  btn.click();
+  await new Promise((r) => setTimeout(r, 300));
+  const pop = root.querySelector(".sharepop");
+  if (!pop) return { button: true, pop: false };
+  const src = pop.querySelector(".thumb").getAttribute("src") || "";
+  const out = {
+    button: true, pop: true,
+    hidden: pop.querySelector(".tg").getAttribute("aria-checked"),
+    svg: decodeURIComponent(src.split(",").slice(1).join(",")),
+    video: !!pop.querySelector('.seg button[data-m="video"]'),
+    copy: !!pop.querySelector(".cp"),
+  };
+  pop.querySelector(".x").click();
+  return out;
+}"""
+MAC_RE = re.compile(r"\b[0-9a-f]{2}(?:[:-][0-9a-f]{2}){5}\b", re.I)
+
+
+async def check_share(ha: HA, card, title: str, engine: str) -> None:
+    """The shared image hides names by default and never holds an address or a name NetOrbit knows."""
+    res = await card.evaluate(SHARE_JS)
+    if not res.get("button"):
+        fail(f"{title} no Share button", "The card header has no .sharebtn")
+        return
+    if not res.get("pop"):
+        fail(f"{title} Share didn't open", "Clicking Share didn't open .sharepop")
+        return
+    svg = res.get("svg") or ""
+    if not svg.startswith("<svg") or "made with NetOrbit" not in svg:
+        fail(f"{title} share image", f"The share preview isn't the exported SVG: {svg[:200]!r}")
+        return
+    if res.get("hidden") != "true":
+        fail(f"{title} share names", "'Hide device names' should be on when the popup opens")
+    attrs = [(s.get("attributes") or {}) for s in await ha.get("/api/states") if (s.get("attributes") or {}).get("netorbit") is True]
+    secrets_ = {a.get(k) for a in attrs for k in ("ip", "mac", "hostname") if a.get(k)}
+    secrets_ |= {d["name"] for d in SAMPLE_DEVICES} | {"CI access point"}
+    low = svg.lower()
+    leaked = sorted(s for s in secrets_ if str(s).lower() in low)
+    if MAC_RE.search(svg):
+        leaked.append(MAC_RE.search(svg).group(0))
+    if leaked:
+        fail(f"{title} share image leaks", f"The exported SVG holds {leaked}")
+    else:
+        log(f"{engine}: share image is clean ({len(svg)} chars, video option {res.get('video')}, copy {res.get('copy')})")
+        summary.append(f"{engine}: Share opens with names hidden, no addresses or names in the image")
+
+
 async def check_browser(pw, engine: str, ha: HA, version: str, out: pathlib.Path) -> None:
     title = f"{engine}:"
     browser = await getattr(pw, engine).launch()
     try:
-        context = await browser.new_context(viewport={"width": 1280, "height": 1100})
-        tokens = {
-            "access_token": ha.token,
-            "token_type": "Bearer",
-            "expires_in": ha.tokens.get("expires_in", 1800),
-            "refresh_token": ha.tokens.get("refresh_token"),
-            "expires": int(time.time() * 1000) + int(ha.tokens.get("expires_in", 1800)) * 1000,
-            "hassUrl": ha.url,
-            "clientId": ha.client_id,
-        }
-        # Log the browser in the same way the frontend remembers a login: tokens in localStorage.
-        await context.add_init_script(f"window.localStorage.setItem('hassTokens', {json.dumps(json.dumps(tokens))});")
-        page = await context.new_page()
-        console: list[tuple[str, str]] = []
-        page_errors: list[str] = []
-        page.on("console", lambda m: console.append((m.type, m.text)))
-        page.on("pageerror", lambda e: page_errors.append(f"{e.name}: {e.message}\n{e.stack or ''}"))
-
+        page, console, page_errors = await logged_in_page(browser, ha)
         await page.goto(f"{ha.url}/{DASHBOARD}/{VIEW}", wait_until="domcontentloaded")
         try:
             await page.wait_for_function("() => !!window.customElements.get('netorbit-card')", timeout=20000)
@@ -466,6 +530,8 @@ async def check_browser(pw, engine: str, ha: HA, version: str, out: pathlib.Path
         await page.wait_for_timeout(1000)
         out.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(out / f"{engine}.png"))
+        if attached and state.get("map"):
+            await check_share(ha, card, title, engine)
 
         banners = [text for _, text in console if "NETORBIT" in text]
         if not banners:
@@ -485,6 +551,109 @@ async def check_browser(pw, engine: str, ha: HA, version: str, out: pathlib.Path
         other = [e.splitlines()[0] for e in page_errors if "netorbit" not in e.lower()]
         if other:
             log(f"{engine}: {len(other)} page error(s) not about NetOrbit (ignored): {other[:5]}")
+    finally:
+        await browser.close()
+
+
+# Watches the card's shadow root and notes the first-scan pill texts and whether the normal header came back
+# after them (status chips, no radar left from the reveal). Returns false when it was already watching this card.
+# The page can reload, or the card be drawn anew, under the check; it is installed again on every poll then.
+OBSERVE_JS = """(card) => {
+  const root = card.shadowRoot;
+  if (!root) return false;
+  if (window.__netorbitSeen && window.__netorbitRoot === root) return false;
+  window.__netorbitRoot = root;
+  const seen = (window.__netorbitSeen = { pills: [], normal: false });
+  const look = () => {
+    const pill = root.querySelector(".scanpill .l1");
+    if (pill && !root.querySelector(".radar.js")) {
+      const t = pill.textContent.replace(/\\s+/g, " ").trim();
+      if (seen.pills[seen.pills.length - 1] !== t) seen.pills.push(t);
+    } else if (seen.pills.length && root.querySelector(".head .chip") && !root.querySelector(".radar, .scanpill")) {
+      seen.normal = true;
+    }
+  };
+  new MutationObserver(look).observe(root, { childList: true, subtree: true, characterData: true });
+  look();
+  return true;
+}"""
+
+
+NORMAL_JS = """(card) => { const r = card.shadowRoot;
+  return !!(r && r.querySelector(".head .chip") && !r.querySelector(".radar, .scanpill")); }"""
+
+
+async def check_scan_takeover(pw, ha: HA, args, out: pathlib.Path) -> None:
+    """A new install in a real browser: while the first scan runs the card shows the scanning pill, and once
+    first_scan_done turns true the map plays in and the normal header comes back.
+
+    NetOrbit remembers that its first scan is done, so this removes the entry and adds it again with the
+    dashboard open. Runs last, since that also drops the sample devices."""
+    title = "chromium first scan:"
+    browser = await pw.chromium.launch()
+    try:
+        page, _console, page_errors = await logged_in_page(browser, ha)
+        loads: list[str] = []
+        page.on("load", lambda: loads.append(page.url))
+        await page.goto(f"{ha.url}/{DASHBOARD}/{VIEW}", wait_until="domcontentloaded")
+        card = page.locator("netorbit-card").first
+        await card.wait_for(state="attached", timeout=20000)
+        # Let the dashboard settle (the map drawn) before NetOrbit goes away under it.
+        try:
+            await card.evaluate("(c) => new Promise((ok) => { const t0 = Date.now(); const f = () => "
+                                "(c.shadowRoot && c.shadowRoot.querySelector('svg.map')) || Date.now() - t0 > 30000 ? ok() : setTimeout(f, 200); f(); })")
+        except Exception as err:  # noqa: BLE001 - the page reloaded; the loop below finds the card again
+            log(f"chromium: waiting for the map: {type(err).__name__}: {err}")
+        pills: list[str] = []
+        normal = False
+        installs = 0
+
+        async def poll() -> None:
+            """Watch the card that is there now and add what it saw since the last poll."""
+            nonlocal normal, installs
+            try:
+                if await card.evaluate(OBSERVE_JS, timeout=5000):
+                    installs += 1
+                seen = await page.evaluate("() => window.__netorbitSeen || null")
+                now_normal = await card.evaluate(NORMAL_JS, timeout=5000)
+            except Exception:  # noqa: BLE001 - navigating or redrawing right now; try again next round
+                return
+            for p in (seen or {}).get("pills") or []:
+                if not pills or pills[-1] != p:
+                    pills.append(p)
+            # The normal header counts once the pill has been seen, by the watcher or by an earlier poll.
+            normal = normal or bool(pills and ((seen or {}).get("normal") or now_normal))
+
+        await poll()
+        for entry in await ha.get("/api/config/config_entries/entry?domain=netorbit"):
+            await ha.delete(f"/api/config/config_entries/entry/{entry['entry_id']}")
+        log(f"Removed NetOrbit and adding it again with the dashboard open (page loads so far: {len(loads)})")
+        await add_netorbit(ha, args.subnet, args.gateway)
+        deadline = time.monotonic() + 240
+        shot = False
+        while time.monotonic() < deadline:
+            await poll()
+            if pills and not shot:
+                out.mkdir(parents=True, exist_ok=True)
+                await page.screenshot(path=str(out / "chromium-first-scan.png"))
+                shot = True
+            if normal:
+                break
+            await page.wait_for_timeout(250)
+        if installs > 1 or len(loads) > 1:
+            log(f"chromium: the page loaded {len(loads)} time(s) and the card was watched {installs} time(s) during the check")
+        if not any(p.startswith("Scanning your network... found") for p in pills):
+            fail(f"{title} no scanning pill", f"The card never showed 'Scanning your network... found N devices' during the first scan. Seen: {pills}")
+        elif not normal:
+            fail(f"{title} header didn't come back", f"After the first scan the card should show the normal header. Pills seen: {pills}")
+        else:
+            log(f"chromium: first scan pill went {pills[0]!r} .. {pills[-1]!r}, then the normal header came back")
+            summary.append(f"chromium: first scan showed the scanning pill ({len(pills)} updates), then the map and normal header")
+        await page.wait_for_timeout(500)
+        await page.screenshot(path=str(out / "chromium-after-first-scan.png"))
+        for err in page_errors:
+            if "netorbit" in err.lower():
+                fail(f"{title} page error", err[:1500])
     finally:
         await browser.close()
 
@@ -525,6 +694,11 @@ async def run(args) -> int:
                     await check_browser(pw, engine.strip(), ha, version, out)
                 except Exception as err:  # noqa: BLE001
                     fail(f"{engine}: browser check crashed", f"{type(err).__name__}: {err}")
+            if "chromium" in args.browsers:
+                try:
+                    await check_scan_takeover(pw, ha, args, out)
+                except Exception as err:  # noqa: BLE001
+                    fail("chromium first scan: check crashed", f"{type(err).__name__}: {err}")
     report("E2E failed" if failures else "E2E passed")
     if failures:
         log(f"\n{len(failures)} check(s) failed")

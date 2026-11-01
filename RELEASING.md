@@ -14,3 +14,12 @@
 ## Getting into the default list
 
 Anyone can add NetOrbit as a custom repository today. To show up when people search the Marketplace without adding it, it has to be in the default list: open a pull request to https://github.com/hacs/default adding `the-scott-davis/netorbit` to the `integration` file, in alphabetical order, from a personal account (the PR must be editable). Its checks repeat the list above plus "at least one release" and "the domain isn't used by a core integration".
+
+## Manual checks before promoting to Latest
+
+The browser tests cover Chromium and WebKit, but a few things need real devices:
+
+- iPhone, in the Home Assistant iOS app: pinch to zoom the map, then drag while zoomed in.
+- Desktop Safari: trackpad pinch over the map.
+- Share image and video, in Safari and in the iOS app (Share arrives with PR #16).
+- The first-scan animation on a fresh install.

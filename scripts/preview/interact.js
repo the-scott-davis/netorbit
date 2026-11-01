@@ -1,12 +1,17 @@
-// Browser test of edit mode: node scripts/preview/interact.js (needs playwright and a server on :8766)
-const { chromium } = require("playwright");
+// Browser test of edit mode and zoom: node scripts/preview/interact.js (needs playwright and a server on :8766,
+// or on the address in NETORBIT_PREVIEW).
+// BROWSER=webkit runs it in WebKit (the touch cases that need Chrome's DevTools protocol are skipped there).
+const { chromium, webkit } = require("playwright");
 const assert = require("node:assert");
+const fs = require("node:fs");
+const IS_WEBKIT = process.env.BROWSER === "webkit";
+const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/\/+$/, "");
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await (IS_WEBKIT ? webkit : chromium).launch();
   const page = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
   page.setDefaultTimeout(8000);
   page.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-  await page.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+  await page.goto(BASE + "/scripts/preview/index.html?s=novice");
   await page.waitForFunction(() => window.ready);
   const card = page.locator("netorbit-card");
   const center = async (sel) => {
@@ -97,7 +102,7 @@ const assert = require("node:assert");
   // 8. Touch: drag with a finger on a phone sized screen.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(8000);
-  await phone.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+  await phone.goto(BASE + "/scripts/preview/index.html?s=novice");
   await phone.waitForFunction(() => window.ready);
   const c2 = phone.locator("netorbit-card");
   await c2.locator(".editbtn").click();
@@ -108,7 +113,7 @@ const assert = require("node:assert");
   // 8b. A flick: press, one move partway, release on the hub with no move there.
   {
     const fl = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
-    await fl.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await fl.goto(BASE + "/scripts/preview/index.html?s=novice");
     await fl.waitForFunction(() => window.ready);
     const c4 = fl.locator("netorbit-card");
     await c4.locator(".editbtn").click();
@@ -135,7 +140,7 @@ const assert = require("node:assert");
   // 9. Drag still lands on a narrower card (tablets, side panels).
   for (const w of [760, 600]) {
     const nar = await browser.newPage({ viewport: { width: w, height: 1000 } });
-    await nar.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await nar.goto(BASE + "/scripts/preview/index.html?s=novice");
     await nar.waitForFunction(() => window.ready);
     const c3 = nar.locator("netorbit-card");
     await c3.locator(".editbtn").click();
@@ -153,7 +158,7 @@ const assert = require("node:assert");
   {
     const sp = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
     sp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-    await sp.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await sp.goto(BASE + "/scripts/preview/index.html?s=novice");
     await sp.waitForFunction(() => window.ready);
     const c5 = sp.locator("netorbit-card");
     await c5.locator(".editbtn").click();
@@ -188,7 +193,7 @@ const assert = require("node:assert");
   for (const [q, want] of [["", "online"], ["&internet=down", "stale"], ["&internet=off", null]]) {
     const ip = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
     ip.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-    await ip.goto("http://localhost:8766/scripts/preview/index.html?s=novice" + q);
+    await ip.goto(BASE + "/scripts/preview/index.html?s=novice" + q);
     await ip.waitForFunction(() => window.ready);
     const c6 = ip.locator("netorbit-card");
     const node = c6.locator('.node.inet[data-key="internet"]');
@@ -205,6 +210,529 @@ const assert = require("node:assert");
     }
     console.log(`internet ${want || "off"} ok`);
     await ip.close();
+  }
+
+  // 12. The first scan: radar, a "Scanning N%" chip and a pill with what was found so far, instead of the
+  //     status chips, legend and buttons.
+  {
+    const sc = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    sc.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await sc.goto(BASE + "/scripts/preview/index.html?s=firstscan");
+    await sc.waitForFunction(() => window.ready);
+    const c7 = sc.locator("netorbit-card");
+    assert.strictEqual((await c7.locator(".scanpill .l1").textContent()).trim(), "Scanning your network... found 12 devices");
+    assert.strictEqual((await c7.locator(".scanpill .l2").textContent()).trim(), "Pinging every address");
+    assert.strictEqual((await c7.locator(".head .scanchip").textContent()).trim(), "Scanning 30%");
+    assert.strictEqual(await c7.locator(".head .chip, .head .editbtn, .head .sharebtn").count(), 0, "status chips and buttons make way for the scan");
+    assert.strictEqual(await c7.locator(".legend").evaluate((e) => getComputedStyle(e).visibility), "hidden", "legend hidden while scanning");
+    assert.strictEqual(await c7.locator(".node.dev").count(), 0, "devices only arrive when the scan is done");
+    assert.ok(await c7.locator(".radar .beam").evaluate((e) => getComputedStyle(e).display !== "none"), "beam sweeps");
+    // The found count follows the sensor without redrawing the radar.
+    await sc.evaluate(() => {
+      const card = document.querySelector("netorbit-card");
+      const st = window.NETORBIT_SCENARIOS.firstscan;
+      card.shadowRoot.querySelector(".radar").dataset.mark = "same";
+      Object.assign(st["sensor.netorbit_devices_online"].attributes, { found: 21, scan_phase: "names", scan_progress: 55 });
+      card.hass = Object.assign({}, card._hass, { states: Object.assign({}, st) });
+    });
+    assert.strictEqual((await c7.locator(".scanpill .l1").textContent()).trim(), "Scanning your network... found 21 devices");
+    assert.strictEqual((await c7.locator(".scanpill .l2").textContent()).trim(), "Asking devices their names");
+    assert.strictEqual((await c7.locator(".head .scanchip").textContent()).trim(), "Scanning 55%");
+    assert.strictEqual(await c7.locator(".radar").getAttribute("data-mark"), "same", "progress updates in place");
+    console.log("first scan takeover ok");
+    await sc.close();
+
+    // Reduced motion: no beam, no pulses, the rings stay; words and progress still update.
+    const rm = await browser.newPage({ viewport: { width: 1008, height: 1100 }, reducedMotion: "reduce" });
+    await rm.goto(BASE + "/scripts/preview/index.html?s=firstscan");
+    await rm.waitForFunction(() => window.ready);
+    const c8 = rm.locator("netorbit-card");
+    assert.strictEqual(await c8.locator(".radar .beam").evaluate((e) => getComputedStyle(e).display), "none", "no beam with reduced motion");
+    assert.strictEqual(await c8.locator(".radar .pr").first().evaluate((e) => getComputedStyle(e).display), "none", "no pulses with reduced motion");
+    assert.strictEqual(await c8.locator(".radar .st").count(), 3, "range rings stay");
+    assert.strictEqual(await c8.locator(".scanchip .rb").evaluate((e) => getComputedStyle(e).animationName), "none");
+    assert.ok((await c8.locator(".scanpill .l1").textContent()).includes("found 12"));
+    console.log("reduced motion ok");
+    await rm.close();
+
+    // A later scan: the normal map, plus a small chip before Edit layout.
+    const rs = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    await rs.goto(BASE + "/scripts/preview/index.html?s=rescan");
+    await rs.waitForFunction(() => window.ready);
+    const c9 = rs.locator("netorbit-card");
+    assert.strictEqual((await c9.locator(".head .scanchip").textContent()).trim(), "Scanning...");
+    assert.ok(await c9.locator(".head .chip").count() >= 3, "status chips stay");
+    assert.ok(await c9.locator(".head .editbtn").isVisible(), "Edit layout stays");
+    assert.strictEqual(await c9.locator(".scanpill, .radar").count(), 0, "no takeover on a later scan");
+    assert.ok(await c9.locator(".head .scanchip + .sharebtn").count(), "chip sits before Share and Edit layout");
+    console.log("rescan chip ok");
+    await rs.close();
+
+    // The first scan finishes: the map plays in, then the normal header and legend come back.
+    const fin = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    fin.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await fin.goto(BASE + "/scripts/preview/index.html?s=firstscan&finish=800");
+    await fin.waitForFunction(() => window.finished);
+    const c10 = fin.locator("netorbit-card");
+    assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "reveal plays when the first map arrives");
+    assert.ok((await c10.locator(".scanpill .l1").textContent()).startsWith("Found "));
+    await fin.waitForFunction(() => {
+      const r = document.querySelector("netorbit-card").shadowRoot;
+      return r.querySelectorAll(".scanpill, .radar, .scanchip").length === 0;
+    }, null, { timeout: 10000 });
+    assert.strictEqual(await c10.locator(".scanpill, .radar, .scanchip").count(), 0, "reveal cleaned up");
+    assert.ok(await c10.locator(".head .editbtn").isVisible() && await c10.locator(".legend").isVisible(), "normal header and legend are back");
+    assert.ok(await c10.locator(".node.dev").count() > 20, "devices on the map");
+    console.log("reveal ok");
+
+    // Replay it from the Share popup.
+    await c10.locator(".sharebtn").click();
+    await c10.locator(".sharepop .replay").click();
+    assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "replay plays the reveal");
+    await fin.waitForTimeout(4500);
+    assert.strictEqual(await c10.locator(".radar").count(), 0, "replay cleaned up");
+    console.log("replay ok");
+
+    // Replaying twice, 1.5 s apart: the older run must not cut the newer one short (it would end 2.5 s in).
+    await fin.evaluate(() => document.querySelector("netorbit-card").replayScan());
+    await fin.waitForTimeout(1500);
+    await fin.evaluate(() => document.querySelector("netorbit-card").replayScan());
+    await fin.waitForTimeout(2600);
+    assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "a second replay still plays 2.6 s in");
+    await fin.waitForTimeout(2000);
+    assert.strictEqual(await c10.locator(".radar").count(), 0, "second replay cleaned up");
+    console.log("double replay ok");
+    await fin.close();
+  }
+
+  // 13. Share: an image with names hidden by default and never an address, and the scan as a video.
+  {
+    const sctx = await browser.newContext({ viewport: { width: 1008, height: 1100 }, acceptDownloads: true });
+    const sh = await sctx.newPage();
+    sh.setDefaultTimeout(8000);
+    sh.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await sh.goto(BASE + "/scripts/preview/index.html?s=full");
+    await sh.waitForFunction(() => window.ready);
+    await sh.waitForTimeout(500);
+    const c11 = sh.locator("netorbit-card");
+    await c11.locator(".sharebtn").click();
+    assert.ok(await c11.locator(".sharepop").isVisible(), "Share opens");
+    assert.strictEqual(await c11.evaluate((e) => getComputedStyle(e).display), "block", "the card is a block element");
+    assert.strictEqual(await c11.locator(".sharepop .tg").getAttribute("aria-checked"), "true", "names hidden by default");
+    const shared = () => c11.locator(".sharepop .thumb").evaluate((img) => decodeURIComponent(img.src.split(",").slice(1).join(",")));
+    const names = await sh.evaluate(() => Object.values(window.NETORBIT_SCENARIOS.full).map((s) => s.attributes.label).filter((l) => l && !/^(Router|Internet)$/.test(l)));
+    let svg = await shared();
+    assert.ok(svg.startsWith("<svg") && svg.includes("made with NetOrbit") && svg.includes("My home network"));
+    assert.ok(!svg.includes("192.0.2."), "no IP addresses in the shared image");
+    assert.ok(!/\b[0-9a-f]{2}([:-][0-9a-f]{2})+\b/i.test(svg), "no MAC addresses in the shared image");
+    const leaked = names.filter((n) => svg.includes(">" + n + "<"));
+    assert.deepStrictEqual(leaked, [], "no real names in the shared image");
+    assert.ok(svg.includes(">TV 1<") && svg.includes(">Access point<"), "generic names instead");
+    assert.ok(!svg.includes("New devices") && !svg.includes("esp-7c2d1a") && !svg.includes("Edit layout"), "no waiting devices, suggestions or buttons");
+    const [png] = await Promise.all([sh.waitForEvent("download"), c11.locator(".sharepop .dl").click()]);
+    const pngPath = await png.path();
+    const buf = require("fs").readFileSync(pngPath);
+    assert.strictEqual(buf.slice(1, 4).toString(), "PNG");
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+    assert.ok(buf.length > 50000 && buf.length < 12e6 && w >= 1000 && h >= 1000, `PNG ${w}x${h}, ${buf.length} bytes`);
+    console.log(`share PNG ok: ${png.suggestedFilename()} ${w}x${h} ${buf.length} bytes`);
+    await c11.locator(".sharepop .tg").click();
+    svg = await shared();
+    assert.ok(svg.includes(">Core Switch<") && svg.includes(">Bedroom TV<"), "names come back with the toggle off");
+    assert.ok(!svg.includes("192.0.2.") && !/\b[0-9a-f]{2}([:-][0-9a-f]{2})+\b/i.test(svg), "still no addresses with names shown");
+    await c11.locator(".sharepop .tg").click();
+    // The system share sheet gets the PNG when there is one; closing it does nothing; a refusal falls back to a download.
+    await sh.evaluate(() => {
+      const card = document.querySelector("netorbit-card");
+      window.__dl = 0;
+      window.__shared = [];
+      window.__shareErr = null;
+      card._download = () => { window.__dl++; };
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: (d) => !!(d && d.files && d.files.length) });
+      Object.defineProperty(navigator, "share", { configurable: true, value: (d) => {
+        window.__shared.push(d.files[0].name + ":" + d.files[0].type);
+        return window.__shareErr ? Promise.reject(Object.assign(new Error("no"), { name: window.__shareErr })) : Promise.resolve();
+      } });
+    });
+    await c11.locator(".sharepop .dl").click();
+    await sh.waitForFunction(() => window.__shared.length === 1);
+    assert.deepStrictEqual(await sh.evaluate(() => window.__shared), ["netorbit-map.png:image/png"]);
+    await sh.waitForTimeout(300);
+    assert.strictEqual(await sh.evaluate(() => window.__dl), 0, "no download when the share sheet took it");
+    await sh.evaluate(() => (window.__shareErr = "AbortError"));
+    await c11.locator(".sharepop .dl").click();
+    await sh.waitForFunction(() => window.__shared.length === 2);
+    await sh.waitForTimeout(300);
+    assert.strictEqual(await sh.evaluate(() => window.__dl), 0, "closing the share sheet does not download");
+    await sh.evaluate(() => (window.__shareErr = "NotAllowedError"));
+    await c11.locator(".sharepop .dl").click();
+    await sh.waitForFunction(() => window.__dl === 1);
+    console.log("share sheet ok");
+    await sh.evaluate(() => { delete navigator.canShare; delete navigator.share; });
+
+    // Recording a canvas (MediaRecorder, captureStream) is only checked in Chromium.
+    if (IS_WEBKIT) {
+      console.log("share video skipped in WebKit");
+    } else {
+      // Chromium can record a canvas: the Animation option is there and gives a video.
+      assert.ok(await c11.locator('.sharepop .seg button[data-m="video"]').isVisible(), "animation option offered");
+      await c11.locator('.sharepop .seg button[data-m="video"]').click();
+      const status = () => c11.locator(".sharepop .status").textContent();
+      const allEnded = () => sh.evaluate(() => window.__streams.length > 0 && window.__streams.every((s) => s.getTracks().every((t) => t.readyState === "ended")));
+      // A recorder that throws on creation: the button comes back, the error shows, the stream is released.
+      await sh.evaluate(() => {
+        window.__streams = [];
+        const cs = HTMLCanvasElement.prototype.captureStream;
+        HTMLCanvasElement.prototype.captureStream = function () { const s = cs.apply(this, arguments); window.__streams.push(s); return s; };
+        window.__MR = window.MediaRecorder;
+        window.MediaRecorder = class { constructor() { throw new Error("boom"); } static isTypeSupported() { return true; } };
+      });
+      await c11.locator(".sharepop .rec").click();
+      await sh.waitForFunction(() => document.querySelector("netorbit-card").shadowRoot.querySelector(".sharepop .status").textContent.includes("boom"));
+      assert.ok((await status()).startsWith("Couldn't record"), await status());
+      assert.ok(await c11.locator(".sharepop .rec").isEnabled(), "Save video is enabled again after a failure");
+      assert.ok(await allEnded(), "tracks stopped after a failure");
+      await sh.evaluate(() => { window.MediaRecorder = window.__MR; window.__streams = []; window.__dl = 0; });
+      // Closing the popup mid-recording cancels it: nothing is downloaded and the stream is released.
+      await c11.locator(".sharepop .rec").click();
+      await sh.waitForTimeout(700);
+      await c11.locator(".sharepop .x").click();
+      await sh.waitForTimeout(1500);
+      assert.strictEqual(await sh.evaluate(() => window.__dl), 0, "a cancelled recording is not downloaded");
+      assert.ok(await allEnded(), "tracks stopped after a cancel");
+      await sh.evaluate(() => { delete document.querySelector("netorbit-card")._download; });
+      await c11.locator(".sharebtn").click();
+      assert.ok(await c11.locator(".sharepop .tg").isVisible(), "Share opens again after a cancel");
+      await c11.locator('.sharepop .seg button[data-m="video"]').click();
+      assert.ok(await c11.locator(".sharepop .rec").isEnabled(), "Save video is ready again");
+      console.log("video failure and cancel ok");
+      const [vid] = await Promise.all([sh.waitForEvent("download", { timeout: 30000 }), c11.locator(".sharepop .rec").click()]);
+      const size = require("fs").statSync(await vid.path()).size;
+      assert.ok(size > 20000, `video has ${size} bytes`);
+      assert.ok(/^netorbit-scan\.(mp4|webm)$/.test(vid.suggestedFilename()), vid.suggestedFilename());
+      console.log(`share video ok: ${vid.suggestedFilename()} ${size} bytes`);
+    }
+    await c11.locator(".sharepop .x").click();
+    assert.strictEqual(await c11.locator(".sharepop").count(), 0, "popup closes");
+    await sctx.close();
+  }
+
+  // 14. Zoom and pan. Each case gets a fresh page.
+  const URL = BASE + "/scripts/preview/index.html?s=novice";
+  const open = async (opts = {}, query = "") => {
+    const p = await browser.newPage(Object.assign({ viewport: { width: 1008, height: 1100 } }, opts));
+    p.setDefaultTimeout(8000);
+    p.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await p.goto(URL + query);
+    await p.waitForFunction(() => window.ready);
+    return p;
+  };
+  const viewBox = (p) => p.evaluate(() => document.querySelector("netorbit-card").shadowRoot.querySelector("svg.map").getAttribute("viewBox"));
+  const viewW = async (p) => Number((await viewBox(p)).split(" ")[2]);
+  const labelOf = (p, key) => p.evaluate((k) => {
+    const el = document.querySelector("netorbit-card").shadowRoot.querySelector(`.node[data-key="${CSS.escape(k)}"] text`);
+    return el ? el.textContent : null;
+  }, key);
+  // Rename a device in the fake states and push a new hass object, the way Home Assistant sends an update.
+  const relabel = (p, name, label) => p.evaluate(([n, l]) => {
+    Object.values(window.NETORBIT_SCENARIOS.novice).find((s) => s.attributes.label === n).attributes.label = l;
+    window.pushHass();
+  }, [name, label]);
+  const keyOfIn = (p, label) => p.evaluate((l) => Object.values(window.NETORBIT_SCENARIOS.novice).find((s) => s.attributes.label === l).attributes.node_key, label);
+  const centerIn = async (p, sel) => {
+    const b = await p.locator("netorbit-card").locator(sel).first().boundingBox();
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  const mapBox = (p) => p.locator("netorbit-card").locator("svg.map").boundingBox();
+  // A spot on the map background: not a device, hub or button.
+  const backgroundPoint = (p) => p.evaluate(() => {
+    const root = document.querySelector("netorbit-card").shadowRoot, r = root.querySelector("svg.map").getBoundingClientRect();
+    for (let y = r.top + 12; y < r.bottom - 12; y += 17) for (let x = r.left + 12; x < r.right - 12; x += 17) {
+      const el = root.elementFromPoint(x, y);
+      if (el && el.closest && el.closest("svg.map") && !el.closest(".node, .zoomctl")) return { x, y };
+    }
+    return null;
+  });
+  const settle = (p) => p.waitForTimeout(60);
+  // A wheel event on the map, at a screen position (the middle of the map by default). Returns whether the card took it.
+  const wheelAt = (p, init, at) => p.evaluate(([i, pos]) => {
+    const svg = document.querySelector("netorbit-card").shadowRoot.querySelector("svg.map");
+    const r = svg.getBoundingClientRect();
+    const ev = new WheelEvent("wheel", Object.assign({ bubbles: true, cancelable: true, composed: true,
+      clientX: pos ? pos.x : r.left + r.width / 2, clientY: pos ? pos.y : r.top + r.height / 2 }, i));
+    svg.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }, [init, at || null]);
+
+  // 14a. The + button zooms in, the whole-map button zooms back out.
+  {
+    const p = await open();
+    const c = p.locator("netorbit-card");
+    const whole = await viewW(p);
+    await c.locator(".zin").click();
+    const zoomed = await viewW(p);
+    assert.ok(zoomed < whole - 1, `the + button zooms in (${whole} -> ${zoomed})`);
+    await c.locator(".zfit").click();
+    assert.strictEqual(await viewW(p), whole, "the whole-map button zooms back out");
+    console.log("zoom buttons ok");
+    await p.close();
+  }
+
+  // 14b. The zoom survives a Home Assistant update that redraws the map.
+  {
+    const p = await open();
+    const c = p.locator("netorbit-card");
+    await c.locator(".zin").click(); await c.locator(".zin").click();
+    const vb = await viewBox(p);
+    const lamp = await keyOfIn(p, "Lamp");
+    await relabel(p, "Lamp", "Zed");
+    await p.waitForFunction(([k]) => document.querySelector("netorbit-card").shadowRoot.querySelector(`.node[data-key="${CSS.escape(k)}"] text`).textContent.startsWith("Zed"), [lamp]);
+    assert.strictEqual(await viewBox(p), vb, "the zoom survives a redraw from a hass update");
+    console.log("zoom survives hass update ok");
+    await p.close();
+  }
+
+  // 14c. The zoom survives toggling Edit layout.
+  {
+    const p = await open();
+    const c = p.locator("netorbit-card");
+    await c.locator(".zin").click(); await c.locator(".zin").click();
+    const vb = await viewBox(p);
+    await c.locator(".editbtn").click();
+    assert.ok(await c.locator(".banner").isVisible(), "edit mode is on");
+    assert.strictEqual(await viewBox(p), vb, "the zoom survives turning Edit layout on");
+    await c.locator(".editbtn").click();
+    assert.strictEqual(await viewBox(p), vb, "the zoom survives turning Edit layout off");
+    console.log("zoom survives edit toggle ok");
+    await p.close();
+  }
+
+  // 14d. Dragging a device onto a hub while zoomed in sends assign_device for that hub.
+  {
+    const p = await open();
+    const c = p.locator("netorbit-card");
+    await c.locator(".editbtn").click();
+    const plugKey = await keyOfIn(p, "Smart Plug");
+    const plugAt = await centerIn(p, `.node[data-key="${plugKey}"] circle.disc`), hubAt = await centerIn(p, '.node[data-key="hub:m1"] circle.disc');
+    // Zoom in on the spot between the two.
+    const mid = { x: (plugAt.x + hubAt.x) / 2, y: (plugAt.y + hubAt.y) / 2 };
+    const whole = await viewW(p);
+    await wheelAt(p, { deltaY: -40, ctrlKey: true }, mid);
+    await wheelAt(p, { deltaY: -40, ctrlKey: true }, mid);
+    assert.ok((await viewW(p)) < whole * 0.5, "zoomed in");
+    const box = await mapBox(p);
+    const inside = (pt) => pt.x > box.x + 8 && pt.x < box.x + box.width - 8 && pt.y > box.y + 8 && pt.y < box.y + box.height - 8;
+    const dev = { k: plugKey, pt: await centerIn(p, `.node[data-key="${plugKey}"] circle.disc`) };
+    assert.ok(inside(dev.pt), "the device is on screen while zoomed in");
+    const hub = await centerIn(p, '.node[data-key="hub:m1"] circle.disc');
+    assert.ok(inside(hub), "the hub is on screen while zoomed in");
+    const before = (await p.evaluate(() => window.calls)).length;
+    await p.mouse.move(dev.pt.x, dev.pt.y); await p.mouse.down();
+    await p.mouse.move((dev.pt.x + hub.x) / 2, (dev.pt.y + hub.y) / 2, { steps: 6 });
+    await p.mouse.move(hub.x, hub.y, { steps: 6 });
+    assert.ok(await c.locator('.node.hub.hot[data-key="hub:m1"]').count(), "the hub highlights while dragging when zoomed");
+    await p.mouse.up();
+    const calls = await p.evaluate(() => window.calls);
+    assert.strictEqual(calls.length, before + 1, "one call was sent");
+    assert.deepStrictEqual(calls.at(-1).slice(0, 2), ["netorbit", "assign_device"]);
+    assert.strictEqual(calls.at(-1)[2].hub, "m1", "the device went to the hub it was dropped on");
+    console.log("zoomed drag ok:", JSON.stringify(calls.at(-1)[2]));
+    await p.close();
+  }
+
+  // 14e. A mouse button released just outside the map must not leave it panning, or hold back redraws.
+  {
+    const p = await open();
+    const c = p.locator("netorbit-card");
+    await c.locator(".zin").click(); await c.locator(".zin").click();
+    const vb = await viewBox(p);
+    const box = await mapBox(p);
+    const y = box.y + box.height / 2;
+    await p.mouse.move(box.x + box.width - 2, y);
+    await p.mouse.down();
+    await p.mouse.move(box.x + box.width + 3, y);
+    await p.mouse.up();
+    // Button up now. Moving the mouse across the map must not pan it.
+    await p.mouse.move(box.x + box.width - 40, y, { steps: 4 });
+    await p.mouse.move(box.x + box.width / 2, y + 60, { steps: 8 });
+    assert.strictEqual(await viewBox(p), vb, "a mouse moving with no button down does not pan");
+    const lamp = await keyOfIn(p, "Lamp");
+    await relabel(p, "Lamp", "Yak");
+    await p.waitForFunction(([k]) => document.querySelector("netorbit-card").shadowRoot.querySelector(`.node[data-key="${CSS.escape(k)}"] text`).textContent.startsWith("Yak"), [lamp]);
+    console.log("stuck mouse pan ok");
+    await p.close();
+  }
+
+  // 14f. An update that arrives during a plain tap or press is drawn when the finger lifts.
+  {
+    const p = await open();
+    const lamp = await keyOfIn(p, "Lamp");
+    const bg = await backgroundPoint(p);
+    assert.ok(bg, "found a spot on the map background");
+    await p.mouse.move(bg.x, bg.y);
+    await p.mouse.down();
+    await relabel(p, "Lamp", "Xen");
+    await settle(p);
+    assert.ok(!(await labelOf(p, lamp)).startsWith("Xen"), "nothing is redrawn under the finger");
+    await p.mouse.up();
+    await p.waitForFunction(([k]) => document.querySelector("netorbit-card").shadowRoot.querySelector(`.node[data-key="${CSS.escape(k)}"] text`).textContent.startsWith("Xen"), [lamp]);
+    console.log("update held during a tap is drawn on release ok");
+    await p.close();
+  }
+
+  // 14g. Ctrl or Cmd with the wheel zooms, a plain wheel does not. Firefox reports lines instead of pixels.
+  {
+    const whole = await (async () => { const p = await open(); const w = await viewW(p); await p.close(); return w; })();
+    const p = await open();
+    assert.strictEqual(await wheelAt(p, { deltaY: -100 }), false, "a plain wheel is left to the page");
+    assert.strictEqual(await viewW(p), whole, "a plain wheel does not zoom");
+    assert.strictEqual(await wheelAt(p, { deltaY: -10, ctrlKey: true }), true, "Ctrl+wheel is taken by the map");
+    const px = await viewW(p);
+    assert.ok(px < whole - 1, "Ctrl+wheel zooms in");
+    await p.close();
+    const q = await open();
+    assert.strictEqual(await wheelAt(q, { deltaY: -1, deltaMode: 1, metaKey: true }), true, "Cmd+wheel is taken by the map");
+    const lines = await viewW(q);
+    await q.close();
+    // One line of scroll is a notch of about 16 px: it zooms like -16 pixels, and far more than a single pixel would.
+    const r = await open();
+    await wheelAt(r, { deltaY: -16, ctrlKey: true });
+    const sixteen = await viewW(r);
+    await r.close();
+    assert.ok(Math.abs(lines - sixteen) < 2, `one wheel line zooms like 16 pixels (${lines} vs ${sixteen})`);
+    assert.ok(lines < whole * 0.95, "one wheel line is a visible zoom step");
+    console.log("wheel zoom ok:", whole, "->", px, "(10 px),", lines, "(1 line),", sixteen, "(16 px)");
+  }
+
+  // 14h. Double-tap on the background zooms back out to the whole map when zoomed in.
+  {
+    const p = await open();
+    const c = p.locator("netorbit-card");
+    const whole = await viewBox(p);
+    await c.locator(".zin").click(); await c.locator(".zin").click();
+    assert.notStrictEqual(await viewBox(p), whole, "zoomed in");
+    const bg = await backgroundPoint(p);
+    assert.ok(bg, "found a spot on the map background");
+    await p.mouse.dblclick(bg.x, bg.y);
+    assert.strictEqual(await viewBox(p), whole, "a double-tap returns to the whole map");
+    await p.mouse.dblclick(bg.x, bg.y);
+    assert.ok((await viewW(p)) < Number(whole.split(" ")[2]) - 1, "and a double-tap on the whole map zooms in");
+    console.log("double-tap zoom ok");
+    await p.close();
+  }
+
+  // 14i. A phone with a real touch screen: a one-finger swipe scrolls the page, a tap on a device opens its details,
+  //      a pinch zooms. The events go through Chrome's DevTools protocol so the browser applies touch-action itself.
+  if (IS_WEBKIT) {
+    const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    await p.evaluate(() => document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)));
+    const tvKey = await keyOfIn(p, "Bedroom TV");
+    await p.locator("netorbit-card").locator(`.node[data-key="${tvKey}"] circle.disc`).tap();
+    assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
+    console.log("phone tap ok (WebKit; swipe and pinch need Chrome's DevTools protocol and run in Chromium only)");
+    await p.close();
+  } else {
+    const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    await p.evaluate(() => { document.body.style.paddingBottom = "2400px"; document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)); });
+    const cdp = await p.context().newCDPSession(p);
+    const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts.map((q, i) => ({ x: q.x, y: q.y, id: i })) });
+    const wait = (ms) => p.waitForTimeout(ms);
+    const whole = await viewBox(p);
+    const box = await mapBox(p);
+    const bg = await backgroundPoint(p);
+    assert.ok(bg, "found a spot on the map background");
+
+    // A tap on a device (the page has not scrolled yet).
+    const tvKey = await keyOfIn(p, "Bedroom TV");
+    const tv = await centerIn(p, `.node[data-key="${tvKey}"] circle.disc`);
+    await touch("touchStart", [tv]); await wait(40); await touch("touchEnd", []); await wait(250);
+    assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
+    assert.strictEqual(await viewBox(p), whole, "a tap does not move the map");
+
+    // One finger swiping up over the whole map scrolls the page.
+    assert.strictEqual(await p.evaluate(() => window.scrollY), 0);
+    let y = bg.y;
+    await touch("touchStart", [{ x: bg.x, y }]);
+    for (let i = 0; i < 12; i++) { y -= 14; await touch("touchMove", [{ x: bg.x, y }]); await wait(16); }
+    await touch("touchEnd", []);
+    // Wait for the fling to come to rest: scrollY is the same on three animation frames in a row.
+    await p.waitForFunction(() => {
+      const w = window, y = w.scrollY;
+      if (w.__lastY === y) w.__still = (w.__still || 0) + 1; else w.__still = 0;
+      w.__lastY = y;
+      return w.__still >= 3;
+    }, null, { polling: "raf" });
+    assert.ok((await p.evaluate(() => window.scrollY)) > 60, "a one-finger swipe over the whole map scrolls the page");
+    assert.strictEqual(await viewBox(p), whole, "and leaves the map alone");
+    await p.evaluate(() => window.scrollTo(0, 0));
+    await wait(100);
+
+    // A pinch over the map zooms it.
+    const b2 = await mapBox(p);
+    const cx = b2.x + b2.width / 2, cy = b2.y + b2.height / 2;
+    await touch("touchStart", [{ x: cx - 20, y: cy }, { x: cx + 20, y: cy }]);
+    for (let i = 1; i <= 10; i++) { await touch("touchMove", [{ x: cx - 20 - i * 9, y: cy }, { x: cx + 20 + i * 9, y: cy }]); await wait(16); }
+    await touch("touchEnd", []);
+    await wait(200);
+    assert.ok((await viewW(p)) < Number(whole.split(" ")[2]) * 0.7, "a pinch zooms the map");
+    assert.ok(Math.abs(await p.evaluate(() => window.scrollY)) < 5, "and does not scroll the page");
+
+    // Zoomed in, one finger pans the map instead of the page. A drag of 120 px should move the view by about
+    // 120 px worth of map units, whether it starts on the background or on a device circle.
+    const vbOf = async () => (await viewBox(p)).split(" ").map(Number);
+    const pan = async (from, label) => {
+      const before = await vbOf();
+      const bx = await mapBox(p);
+      const unitsPerPx = Math.max(before[2] / bx.width, before[3] / bx.height);
+      let x = from.x;
+      await touch("touchStart", [{ x, y: from.y }]);
+      for (let i = 0; i < 10; i++) { x -= 12; await touch("touchMove", [{ x, y: from.y }]); await wait(16); }
+      await touch("touchEnd", []);
+      await wait(200);
+      const after = await vbOf();
+      const want = 120 * unitsPerPx, got = after[0] - before[0];
+      assert.ok(got > want * 0.5, `${label}: one finger pans the map by about the finger distance (moved ${got.toFixed(1)} of ${want.toFixed(1)} units)`);
+      assert.ok(Math.abs(after[2] - before[2]) < 0.01, `${label}: and does not change the zoom`);
+      assert.ok(Math.abs(await p.evaluate(() => window.scrollY)) < 5, `${label}: and the page stays put`);
+    };
+    // A device circle well inside the visible map, with room to drag 120 px to the left of it.
+    const onDevice = await p.evaluate(() => {
+      const root = document.querySelector("netorbit-card").shadowRoot, r = root.querySelector("svg.map").getBoundingClientRect();
+      for (const c of root.querySelectorAll(".node circle.disc")) {
+        const b = c.getBoundingClientRect(), x = b.x + b.width / 2, y = b.y + b.height / 2;
+        if (x > r.left + 140 && x < r.right - 20 && y > r.top + 20 && y < r.bottom - 20 && y < innerHeight - 20) {
+          const hit = root.elementFromPoint(x, y);
+          if (hit && hit.closest && hit.closest(".node")) return { x, y };
+        }
+      }
+      return null;
+    });
+    assert.ok(onDevice, "found a device circle inside the zoomed map");
+    await pan(onDevice, "from a device");
+    const bg2 = await backgroundPoint(p);
+    assert.ok(bg2, "found a background spot in the zoomed map");
+    await pan({ x: Math.max(bg2.x, (await mapBox(p)).x + 140), y: bg2.y }, "from the background");
+    console.log("phone touch ok: swipe scrolls, tap opens details, pinch zooms, drag pans");
+    await p.close();
+  }
+
+  // 15. Card height: a number is pixels, a CSS length is used as given. (A CSS length needs the noHeight helper.)
+  {
+    const src = fs.readFileSync("custom_components/netorbit/frontend/netorbit-card.js", "utf8");
+    const maxH = async (cfg) => {
+      const p = await open({ viewport: { width: 1008, height: 1000 } }, "&cfg=" + encodeURIComponent(JSON.stringify(cfg)));
+      const v = await p.evaluate(() => getComputedStyle(document.querySelector("netorbit-card").shadowRoot.querySelector("svg.map")).maxHeight);
+      await p.close();
+      return v;
+    };
+    assert.strictEqual(await maxH({ height: 600 }), "600px", "height: 600 is 600 px");
+    if (src.includes("noHeight")) {
+      assert.strictEqual(await maxH({ height: "80vh" }), "800px", "height: 80vh is 80% of the window");
+      assert.strictEqual(await maxH({ height: "40rem" }), "640px", "height: 40rem is 40 rem");
+      console.log("height ok: 600, 80vh, 40rem");
+    } else {
+      console.log("height ok: 600 (CSS lengths skipped, noHeight is not in the card yet)");
+    }
   }
 
   await browser.close();

@@ -6,9 +6,22 @@
 - **Faster startup.** Home Assistant no longer waits for NetOrbit's network scan when it starts, so the "Waiting for integrations to complete setup: netorbit" message is gone. NetOrbit draws the map from what it saved and pings those devices, then runs the full scan (ping sweep, ARP, names, SNMP) in the background and updates the map when it's done. The hub tree from the last scan is saved too, so the map looks the same right after a restart.
 - A brand new install finishes setup right away and fills the map once the first scan is done.
 
+### Fixed
+- The Home Assistant host itself now shows on the map (#10). A machine never has an ARP entry for its own address, so it was never found. NetOrbit now adds the host from Home Assistant's network adapters when an adapter address is inside the watched subnet (a container on a Docker bridge network is skipped). It is named "Home Assistant" unless a hostname is known and gets the Home Assistant icon. The first scan after upgrading reports the host as a new device once. If you added the host by hand, that entry is kept and not doubled.
+
 ### Added
+- **Zoom and pan the map.** Pinch, double-tap or Ctrl/Cmd+scroll to zoom, drag to look around, or use the + and - buttons (thanks @xlntech1, #12). Turn it off with the card option `zoom: false`.
+- **Card `height` takes any CSS length**, like `80vh` or `calc(100vh - 180px)`, so the map can fill a Panel view (thanks @ninchistudios, #11). Plain numbers still mean pixels.
+- **First-scan animation on the card.** While the first scan on a new install runs, the card shows a radar sweeping around the router, a "Scanning N%" chip, and a pill at the bottom with how many devices it has found and what it's doing, updated live. When the map arrives it plays in once: the beam turns, hubs and devices pop in as it passes, links draw in, then the labels and the normal header come back. Later scans only add a small "Scanning..." chip before Edit layout. With reduced motion turned on, there's no beam or pulsing, the range rings stay still and the map fades in.
+- **Share your map.** A Share button in the card header makes a PNG of the map (download, or copy where the browser allows) or a short video of the scan animation (mp4 where the browser can record it, otherwise webm). On phones and other browsers with a share sheet, the file opens in it instead of downloading. "Hide device names" is on by default: devices become "TV 1", "Camera 2" and so on, hubs show only their type, and the title becomes "My home network". IP and MAC addresses are never included, and devices waiting to be added and suggested hubs are left out. Turn the button off with the card option `show_share: false`.
+- "Replay scan animation" in the Share popup plays the reveal again.
 - **Grandstream GWN access points over SNMP.** NetOrbit reads the Wi-Fi client table (`GRANDSTREAM-GWN-MIB`) from Grandstream access points that you have as hubs, and places those clients under the access point they are connected to. Not yet tested on real Grandstream hardware. Thanks to @fluffymadness for the request and the MIB details (#18).
 - Scan progress on `sensor.netorbit_devices_online`: `scanning`, `scan_phase`, `scan_progress`, `found` and `first_scan_done`. They change a few times per scan, for the first scan and for the regular ones, and stay out of the history database (`first_scan_done` aside).
+
+### Fixed
+- A mouse button released just outside the map no longer leaves the map panning whenever the mouse moves over it.
+- A Home Assistant update that arrives while you tap or press the map is drawn when you let go. Before, it waited for the next update.
+- Ctrl+scroll zooms at the same speed in Firefox, which reports scroll in lines.
 
 ## 0.2.8
 
