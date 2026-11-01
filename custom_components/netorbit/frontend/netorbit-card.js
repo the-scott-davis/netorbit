@@ -1838,6 +1838,10 @@ class NetOrbitCard extends HTMLElement {
     // Safari: a pinch over the map must not zoom the page as well, and two fingers must not scroll it.
     ["gesturestart", "gesturechange"].forEach((t) => svg.addEventListener(t, (ev) => ev.preventDefault()));
     svg.addEventListener("touchmove", (ev) => { if (ev.touches.length > 1 && ev.cancelable) ev.preventDefault(); }, { passive: false });
+    // A touch that starts on the map belongs to the map. Dashboards that swipe between views (the swipe-navigation
+    // plugin, and anything else listening further up the page) would otherwise read a one-finger pan as a swipe and
+    // change the view under the person's finger; the card's header and legend stay swipeable.
+    ["touchstart", "touchmove", "touchend", "touchcancel"].forEach((t) => svg.addEventListener(t, (ev) => ev.stopPropagation(), { passive: true }));
 
     // Fingers (or the mouse button) on the map right now, and the gesture they are making.
     const fingers = new Map();
