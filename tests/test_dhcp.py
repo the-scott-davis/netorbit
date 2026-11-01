@@ -39,6 +39,37 @@ async def test_device_keeps_name_and_hub_when_ip_changes(hass: HomeAssistant, fa
     assert next(h for h in entry.options["hubs"] if h["id"] == "hall_ap")["host"] == "192.0.2.66"
 
 
+async def test_name_set_from_the_card_sticks_across_an_ip_change_and_clears(hass: HomeAssistant, fake_net, freezer) -> None:
+    """The card's Name field sets NetOrbit's name and the sensor's entity name; both follow the MAC, and empty clears them."""
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    fake_net.alive = {GATEWAY, "192.0.2.10"}
+    fake_net.arp = {"192.0.2.10": TV}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    automatic = next(iter(s for s in _node_states(hass).values() if s.attributes["mac"] == TV.upper())).attributes["label"]
+
+    await hass.services.async_call(DOMAIN, "track_device", {"mac": TV.upper(), "name": "  Exercise Bike  "}, blocking=True)
+    ent_reg = er.async_get(hass)
+    entity_id = _node_states(hass)["Exercise Bike"].entity_id
+    ent_reg.async_update_entity(entity_id, name="Exercise Bike")
+    assert entry.options["devices"][TV]["name"] == "Exercise Bike"
+
+    # DHCP hands the bike a new address.
+    fake_net.alive = {GATEWAY, "192.0.2.88"}
+    fake_net.arp = {"192.0.2.10": TV, "192.0.2.88": TV}
+    await advance(hass, freezer, 301)
+    bike = _node_states(hass)["Exercise Bike"]
+    assert bike.entity_id == entity_id and bike.attributes["ip"] == "192.0.2.88" and bike.attributes["ip_changes"] == 1
+    assert ent_reg.async_get(entity_id).name == "Exercise Bike"
+
+    # An empty name (or only spaces) clears it, and the device goes back to its automatic name.
+    await hass.services.async_call(DOMAIN, "track_device", {"mac": TV.upper(), "name": "   "}, blocking=True)
+    ent_reg.async_update_entity(entity_id, name=None)
+    assert "name" not in entry.options["devices"][TV]
+    assert _node_states(hass)[automatic].entity_id == entity_id
+
+
 async def test_device_added_by_ip_switches_to_its_mac(hass: HomeAssistant, fake_net, freezer) -> None:
     fake_net.alive = {GATEWAY}
     fake_net.arp = {}
