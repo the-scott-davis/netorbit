@@ -10,7 +10,14 @@
 - The Home Assistant host itself now shows on the map (#10). A machine never has an ARP entry for its own address, so it was never found. NetOrbit now adds the host from Home Assistant's network adapters when an adapter address is inside the watched subnet (a container on a Docker bridge network is skipped). It is named "Home Assistant" unless a hostname is known and gets the Home Assistant icon. The first scan after upgrading reports the host as a new device once. If you added the host by hand, that entry is kept and not doubled.
 
 ### Added
+- **Zoom and pan the map.** Pinch, double-tap or Ctrl/Cmd+scroll to zoom, drag to look around, or use the + and - buttons (thanks @xlntech1, #12). Turn it off with the card option `zoom: false`.
+- **Card `height` takes any CSS length**, like `80vh` or `calc(100vh - 180px)`, so the map can fill a Panel view (thanks @ninchistudios, #11). Plain numbers still mean pixels.
 - Scan progress on `sensor.netorbit_devices_online`: `scanning`, `scan_phase`, `scan_progress`, `found` and `first_scan_done`. They change a few times per scan, for the first scan and for the regular ones, and stay out of the history database (`first_scan_done` aside).
+
+### Fixed
+- A mouse button released just outside the map no longer leaves the map panning whenever the mouse moves over it.
+- A Home Assistant update that arrives while you tap or press the map is drawn when you let go. Before, it waited for the next update.
+- Ctrl+scroll zooms at the same speed in Firefox, which reports scroll in lines.
 
 ## 0.2.8
 
