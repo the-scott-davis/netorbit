@@ -1982,7 +1982,11 @@ class NetOrbitCard extends HTMLElement {
     const list = Object.values(hubs).filter((h) => h.kind === "hub" && !below(h))
       .sort((a, b) => (a.key === root ? -1 : b.key === root ? 1 : String(a.label).localeCompare(String(b.label))));
     const now = hubs[n.parent] && list.indexOf(hubs[n.parent]) >= 0 ? n.parent : root;
-    return { now, html: list.map((h) => `<option value="${noEsc(h.key.replace(/^hub:/, ""))}" ${h.key === now ? "selected" : ""}>${noEsc(h.label)}</option>`).join("") };
+    // Two hubs with the same name get their address added, so they can be told apart.
+    const seen = {};
+    list.forEach((h) => { const k = String(h.label).toLowerCase(); seen[k] = (seen[k] || 0) + 1; });
+    const text = (h) => (seen[String(h.label).toLowerCase()] > 1 ? `${h.label} (${h.ip || h.key.replace(/^hub:/, "")})` : h.label);
+    return { now, html: list.map((h) => `<option value="${noEsc(h.key.replace(/^hub:/, ""))}" ${h.key === now ? "selected" : ""}>${noEsc(text(h))}</option>`).join("") };
   }
 
   _hubPopup(n, ev, wrap, place, isRoot, hubs, root) {

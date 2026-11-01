@@ -58,3 +58,20 @@ def test_unknown_parent_rejected():
     with pytest.raises(manage.ManageError, match="No hub called nowhere"):
         manage.update_hub(opts, "office", parent="nowhere")
     assert _parent(opts, "office") == "core"
+
+
+def test_hub_id_beats_another_hubs_name():
+    """The card sends hub ids. A hub renamed to what another hub's id is must not steal the lookup."""
+    from types import SimpleNamespace
+
+    from custom_components.netorbit.coordinator import NetOrbitCoordinator
+
+    hubs = [
+        {"id": "gateway", "name": "Router"},
+        {"id": "ap", "name": "Garage"},
+        {"id": "garage", "name": "AP"},
+    ]
+    coord = SimpleNamespace(opts={CONF_HUBS: hubs}, _seen={})
+    assert NetOrbitCoordinator.resolve_hub(coord, "garage") == "garage"
+    assert NetOrbitCoordinator.resolve_hub(coord, "hub:ap") == "ap"
+    assert NetOrbitCoordinator.resolve_hub(coord, "Garage") == "ap"

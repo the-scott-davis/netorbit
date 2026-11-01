@@ -1044,6 +1044,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         ref = str(ref).strip().removeprefix("hub:")
         low = ref.lower()
         mac = normalize_mac(ref)
+        # An exact id wins over a name: the card sends ids, and a renamed hub's old id can equal another hub's name.
+        for hub in self.opts[CONF_HUBS]:
+            if hub["id"] == ref:
+                return hub["id"]
         for hub in self.opts[CONF_HUBS]:
             if hub["id"] == ref or (hub.get("name") or "").lower() == low or hub.get("host") == ref:
                 return hub["id"]
