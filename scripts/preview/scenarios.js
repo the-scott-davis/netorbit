@@ -41,8 +41,7 @@
     return states;
   }
 
-  window.NETORBIT_SCENARIOS = {
-    full: summary(build((hub, dev) => {
+  const full = (hub, dev) => {
       hub("gateway", "Router", "router", null);
       hub("core", "Core Switch", "switch", "gateway");
       hub("up", "Hallway AP", "access_point", "core");
@@ -58,7 +57,23 @@
       ["Garage Door 1:mdi:garage", "Garage Door 2:mdi:garage", "Shop Lights:mdi:lightbulb-group", "Freezer Sensor:mdi:fridge", "Sprinklers:mdi:sprinkler"]
         .forEach((s) => { const [l, ...ic] = s.split(":"); dev(l, ic.join(":"), "garage"); });
       dev("Weather Station", "mdi:weather-partly-cloudy", "gateway");
-    }), ["Device 3A:91"], [["esp-7c2d1a", "access_point", ["its name looks like an access point"]]]),
+  };
+  // Scan progress on the summary sensor (see NetOrbit's coordinator).
+  const scanning = (states, attrs) => {
+    Object.assign(states["sensor.netorbit_devices_online"].attributes, attrs);
+    return states;
+  };
+
+  window.NETORBIT_SCENARIOS = {
+    full: summary(build(full), ["Device 3A:91"], [["esp-7c2d1a", "access_point", ["its name looks like an access point"]]]),
+    // The very first scan on a new install, 30% in: only the router is known yet.
+    firstscan: scanning(summary(build((hub) => hub("gateway", "Router", "router", null)), []),
+      { scanning: true, scan_phase: "ping", scan_progress: 30, found: 12, first_scan_done: false }),
+    // A later scan, every few minutes: the normal map with a small chip.
+    rescan: scanning(summary(build(full), ["Device 3A:91"], [["esp-7c2d1a", "access_point", ["its name looks like an access point"]]]),
+      { scanning: true, scan_phase: "names", scan_progress: 50, found: 33, first_scan_done: true }),
+    // The first scan has finished.
+    done: scanning(summary(build(full), []), { scanning: false, scan_phase: null, scan_progress: 100, found: 33, first_scan_done: true }),
 
     mesh: summary(build((hub, dev) => {
       hub("gateway", "Mesh Router", "router", null);

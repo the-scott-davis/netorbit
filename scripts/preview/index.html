@@ -4,6 +4,7 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NetOrbit preview</title>
 <style>body { margin:0; background:#111318; padding:24px; max-width:960px; }</style>
 <script>window.MDI = {};</script>
@@ -19,7 +20,9 @@
   catch (e) { try { Object.assign(window.MDI, await import("https://cdn.jsdelivr.net/npm/@mdi/js@7.4.47/mdi.js")); } catch (e2) {} }
   const s = new URLSearchParams(location.search).get("s") || "full";
   const card = document.createElement("netorbit-card");
-  card.setConfig({ title: "Home Network" });
+  // ?cfg={"height":"80vh"} adds card options, for the browser tests.
+  const extra = new URLSearchParams(location.search).get("cfg");
+  card.setConfig(Object.assign({ title: "Home Network" }, extra ? JSON.parse(extra) : {}));
   document.getElementById("c").appendChild(card);
   window.calls = [];
   // ?live=1 applies each action to the fake data, so the map changes the way it would in Home Assistant.
@@ -59,6 +62,33 @@
       if (live) { apply(svc, data); setTimeout(() => { card.hass = Object.assign({}, hass, { states: Object.assign({}, states) }); }, 250); }
     } };
   card.hass = hass;
+  // Handles for the browser tests: a fresh hass object with the (possibly edited) fake states, as Home Assistant sends.
+  window.card = card;
+  window.pushHass = () => { card.hass = Object.assign({}, hass, { states: Object.assign({}, states) }); };
+  // ?s=firstscan&finish=<ms>: the first scan runs through its phases for that long, then finishes with the
+  // "done" network, the way a new install looks in Home Assistant.
+  const finish = Number(new URLSearchParams(location.search).get("finish"));
+  if (s === "firstscan" && finish > 0) {
+    const sum = states[summaryId].attributes;
+    const phases = [["ping", 5], ["arp", 40], ["names", 50], ["snmp", 70], ["layout", 90]];
+    const t0 = Date.now();
+    const tick = () => {
+      const f = Math.min(1, (Date.now() - t0) / finish);
+      if (f >= 1) {
+        const done = window.NETORBIT_SCENARIOS.done;
+        Object.keys(states).forEach((k) => delete states[k]);
+        Object.assign(states, done);
+        card.hass = Object.assign({}, hass, { states: Object.assign({}, states) });
+        window.finished = true;
+        return;
+      }
+      const [phase, base] = phases[Math.min(phases.length - 1, Math.floor(f * phases.length))];
+      Object.assign(sum, { scan_phase: phase, scan_progress: Math.max(base, Math.round(f * 100)), found: Math.round(33 * (1 - Math.pow(1 - f, 2))) });
+      card.hass = Object.assign({}, hass, { states: Object.assign({}, states) });
+      setTimeout(tick, 250);
+    };
+    setTimeout(tick, 250);
+  }
   window.ready = true;
 </script>
 </body>
