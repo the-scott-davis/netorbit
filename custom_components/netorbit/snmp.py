@@ -48,7 +48,7 @@ def is_grandstream(object_id: str | None, descr: str | None = None) -> bool:
 _HEX_MAC = re.compile(r"^[0-9a-f]{12}$")
 
 
-def parse_mac(value: Any) -> str | None:
+    """A MAC as colon separated lowercase hex from raw bytes (6 octets) or from text in
     """A MAC as aa:bb:cc:dd:ee:ff from raw bytes (6 octets) or from text in
     colon, dash or bare hex, optionally with a 0x prefix."""
     if value is None:
