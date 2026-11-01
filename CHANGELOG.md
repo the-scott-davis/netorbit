@@ -6,6 +6,9 @@
 - **Faster startup.** Home Assistant no longer waits for NetOrbit's network scan when it starts, so the "Waiting for integrations to complete setup: netorbit" message is gone. NetOrbit draws the map from what it saved and pings those devices, then runs the full scan (ping sweep, ARP, names, SNMP) in the background and updates the map when it's done. The hub tree from the last scan is saved too, so the map looks the same right after a restart.
 - A brand new install finishes setup right away and fills the map once the first scan is done.
 
+### Fixed
+- The Home Assistant host itself now shows on the map (#10). A machine never has an ARP entry for its own address, so it was never found. NetOrbit now adds the host from Home Assistant's network adapters when an adapter address is inside the watched subnet (a container on a Docker bridge network is skipped). It is named "Home Assistant" unless a hostname is known and gets the Home Assistant icon. The first scan after upgrading reports the host as a new device once. If you added the host by hand, that entry is kept and not doubled.
+
 ### Added
 - **Zoom and pan the map.** Pinch, double-tap or Ctrl/Cmd+scroll to zoom, drag to look around, or use the + and - buttons (thanks @xlntech1, #12). Turn it off with the card option `zoom: false`.
 - **Card `height` takes any CSS length**, like `80vh` or `calc(100vh - 180px)`, so the map can fill a Panel view (thanks @ninchistudios, #11). Plain numbers still mean pixels.

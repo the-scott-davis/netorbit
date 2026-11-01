@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+import ipaddress
 import logging
 import socket
 from typing import Any
@@ -375,6 +376,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             gateway = self.config_entry.data[CONF_GATEWAY]
             self.set_scan(phase="arp", found=len(replied - {gateway}))
             arp = await self.hass.async_add_executor_job(_read_arp)
+            # A machine never has an ARP entry for its own address, so add the host Home
+            # Assistant runs on from its own network adapters.
+            local = await self._local_addresses()
+            arp.update(local)
             ignored = set(self.opts[CONF_IGNORED])
             first_run = not self._initialized
             fresh: list[str] = []
@@ -402,6 +407,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     if key not in ignored and not self._is_hub_address(mac, ip):
                         fresh.append(key)
                 rec["mac"] = mac
+                if ip in local:
+                    rec["local"] = True
                 if rec.get("ip") and rec["ip"] != ip:
                     rec["ip_changes"] = rec.get("ip_changes", 0) + 1
                     rec["ip_changed_at"] = now.isoformat()
@@ -445,6 +452,41 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                         EVENT_NEW_DEVICE,
                         {"mac": rec.get("mac"), "ip": rec.get("ip"), "name": self._discovered_name(key, rec)},
                     )
+
+    async def _local_addresses(self) -> dict[str, str]:
+        """{ip: mac} for this machine's own addresses inside the watched subnet.
+
+        Adapters outside the subnet are skipped, so a container on a Docker bridge network
+        doesn't add its own bridge address.
+        """
+        try:
+            from homeassistant.components import network  # noqa: PLC0415
+
+            adapters = await network.async_get_adapters(self.hass)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("NetOrbit: can't read network adapters: %s", err)
+            return {}
+        net = ipaddress.ip_network(self.subnet, strict=False)
+        wanted: dict[str, str] = {}
+        for adapter in adapters:
+            for addr in adapter.get("ipv4") or []:
+                try:
+                    if ipaddress.ip_address(addr["address"]) in net:
+                        wanted[addr["address"]] = adapter["name"]
+                except (KeyError, ValueError):
+                    continue
+        if not wanted:
+            return {}
+
+        def read() -> dict[str, str]:
+            out = {}
+            for ip, name in wanted.items():
+                mac = normalize_mac(_iface_mac(name))
+                if mac:
+                    out[ip] = mac
+            return out
+
+        return await self.hass.async_add_executor_job(read)
 
     @asynccontextmanager
     async def _scanning(self) -> AsyncIterator[None]:
@@ -687,7 +729,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
         candidates: dict[str, dict[str, Any]] = {}
         for key, rec in self._seen.items():
-            if key.startswith("hub:") or not rec.get("mac") or not rec.get("discovered"):
+            if key.startswith("hub:") or not rec.get("mac") or not rec.get("discovered") or rec.get("local"):
                 continue
             candidates[rec["mac"]] = rec
         # APs that a controller integration reports clients against are hubs by definition.
@@ -862,6 +904,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             return self._ping_names[rec["ip"]]
         if rec.get("hostname"):
             return rec["hostname"]
+        if rec.get("local"):
+            return "Home Assistant"
         vendor = rec.get("vendor")
         if vendor and mac:
             return f"{vendor} {mac[-5:].upper()}"
@@ -917,7 +961,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     hub, placement = ROOT_HUB_ID, PLACE_NONE
             nodes[key] = Node(
                 key=key, kind="device", name=name, ip=ip, mac=rec.get("mac") or cfg.get("mac"),
-                icon=cfg.get("icon") or guess_icon_from(f"{name} {rec.get('hostname') or ''}", rec.get("vendor")),
+                icon=cfg.get("icon") or ("mdi:home-assistant" if rec.get("local") else None) or guess_icon_from(f"{name} {rec.get('hostname') or ''}", rec.get("vendor")),
                 link=hub, sleepy=bool(cfg.get("sleepy", False)),
                 status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
@@ -1097,6 +1141,17 @@ def _read_arp() -> dict[str, str]:
             return parse_proc_arp(fh.read())
     except OSError:
         return {}
+
+
+def _iface_mac(name: str) -> str | None:
+    """The MAC of one of this machine's network interfaces, from sysfs."""
+    if not name or "/" in name or name.startswith("."):
+        return None
+    try:
+        with open(f"/sys/class/net/{name}/address", encoding="ascii") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
 
 
 def _reverse_dns(ip: str) -> str | None:
