@@ -869,6 +869,16 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.strictEqual((await calls()).at(-1)[2].name.length, 64, "a long name is cut to 64");
     await rp.waitForFunction(() => window.wsCalls.length === 5);
 
+    // Saving a menu whose automatic name is longer than the field allows renames nothing.
+    await rp.evaluate((k) => { Object.keys(window.card._hass.entities).forEach((e) => delete window.card._hass.entities[e]); const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === k); st.attributes.label = "n".repeat(100); window.pushHass(); }, tvk);
+    await open();
+    const callsBefore = (await calls()).length;
+    await c8.locator(".pop .rename").click();
+    assert.strictEqual((await calls()).length, callsBefore, "an untouched long automatic name is not renamed");
+    await open();
+    await c8.locator(".pop input.name").press("Enter");
+    assert.strictEqual((await calls()).length, callsBefore, "Enter on an untouched long name renames nothing");
+
     // A private (random) MAC gets a one-line note.
     await rp.evaluate((k) => { const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === k); st.attributes.mac = "02:00:5E:00:53:99"; /* example-ok: a private MAC */ window.pushHass(); }, tvk);
     await open();

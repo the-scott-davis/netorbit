@@ -2001,10 +2001,11 @@ class NetOrbitCard extends HTMLElement {
     const rename = () => {
       const name = q(".name").value.trim().slice(0, NO_NAME_MAX);
       this._closePop(wrap);
-      if (name !== n.label) this._rename(n, name);
+      // Compare with the current name as the field shows it (trimmed and cut), so saving an untouched long name renames nothing.
+      if (name !== String(n.label || "").trim().slice(0, NO_NAME_MAX)) this._rename(n, name);
     };
     q(".rename").addEventListener("click", rename);
-    q(".name").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); rename(); } });
+    q(".name").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); rename(); } });
     q(".move").addEventListener("click", () => {
       const hub = q(".hub").value;
       if (!hub) { q(".hub").focus(); return; }
