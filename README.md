@@ -208,17 +208,18 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | Option | Default | Description |
 | --- | --- | --- |
 | `title` | `Network` | Card title. |
-| `height` | `900` | Maximum height in pixels. |
+| `height` | `900` | Maximum height: pixels, or a CSS length. `calc(100vh - 180px)` fills the window below the header on any screen. |
 | `show_ip` | `false` | Show hub IPs under their names instead of the hub type. Off by default so screenshots are safe to share. |
 | `show_legend` | `true` | Show the legend at the bottom. |
 | `show_internet` | `true` | Show the Internet node above the router (needs the internet check turned on in the integration's settings). |
 | `group_by_type` | `true` | Group unplaced devices by type. |
 | `hide_sleepy_offline` | `false` | Hide sleep-allowed devices while they're offline. |
 | `max_devices` | `80` | Above this many devices, each hub shows its problem devices first and folds the rest into a "+N more" bubble. |
+| `zoom` | `true` | Pinch, double-tap, Ctrl+scroll or the + and − buttons zoom the map; drag to look around while zoomed in. `false` for a fixed map. |
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 | `show_share` | `true` | Show the Share button (image or video of the map, with names hidden by default and no addresses). |
 
-Hover a device for details, tap it for its history. Admins get an **Edit layout** button. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
+Hover a device for details, tap it for its history. Pinch or double-tap to zoom in on a busy part of the map (Ctrl+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get an **Edit layout** button. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
