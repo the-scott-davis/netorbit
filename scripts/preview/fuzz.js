@@ -38,13 +38,18 @@ const fs = require("fs");
         const oy = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
         if (ox > 4 && oy > 4) labelClash++;
       }
-      return { nan, hubs: hubs.length, devs: devs.length, overlap, devClash, labelClash, labels: boxes.length };
+      // The share image, with names hidden and shown, never holds an IP or MAC address.
+      const card = document.querySelector("netorbit-card");
+      const addr = /\b\d{1,3}(\.\d{1,3}){3}\b|\b[0-9a-f]{2}([:-][0-9a-f]{2}){2,}\b/i;
+      const leak = [true, false].map((h) => (card.shareSvg(h).match(addr) || [])[0]).filter(Boolean);
+      return { nan, hubs: hubs.length, devs: devs.length, overlap, devClash, labelClash, labels: boxes.length, leak };
     });
     if (errors.length) problems.push(`${f}: page error ${errors[0]}`);
     if (r.empty) problems.push(`${f}: nothing drawn (${r.empty})`);
     if (r.nan) problems.push(`${f}: NaN/undefined in drawing`);
     if (r.overlap) problems.push(`${f}: ${r.overlap} overlapping hubs (${r.hubs} hubs, ${r.devs} devices)`);
     if (r.labelClash) problems.push(`${f}: ${r.labelClash} hub labels overlapping (${r.labels} labels)`);
+    if (r.leak && r.leak.length) problems.push(`${f}: share image holds an address (${r.leak[0]})`);
     if (r.devClash) problems.push(`${f}: ${r.devClash} device pairs drawn on top of each other (${r.devs} devices)`);
     if ((r.overlap || 0) > worst.overlap) worst = { f, ...r };
   }
