@@ -82,7 +82,7 @@ from .logic import (
     short_hostname,
     subnet_hosts,
 )
-from .snmp import SnmpClient
+from .snmp import SnmpClient, is_grandstream
 from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
 from .topology import Topology, infer, macs_close
@@ -201,6 +201,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._tables: dict[str, dict[str, int]] = {}
         self._topology = Topology()
         self._controller_ap: dict[str, str] = {}
+        self._ap_clients: dict[str, str] = {}  # client MAC -> hub id, from the AP's own SNMP client table
         self._suggestions: list[dict[str, Any]] = []
         self._community_asked: set[str] = set()  # IPs already asked with the custom SNMP community
         self._registry: dict[str, Any] = {}
@@ -431,6 +432,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     await self._detect_hubs()
             # Read tables after detection so switches found in this sweep count straight away.
             self._tables = await self._read_tables() if self.opts[CONF_SNMP_ENABLED] else {}
+            self._ap_clients = await self._read_ap_clients() if self.opts[CONF_SNMP_ENABLED] else {}
             self.set_scan(phase="layout")
             self._infer_layout(now)
 
@@ -620,7 +622,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                         if res:
                             for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
                                 rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
-                                rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "community": "custom" if (comm != SNMP_DEFAULT_COMMUNITY) else "default"}
+                                rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "object_id": res.object_id, "community": "custom" if (comm != SNMP_DEFAULT_COMMUNITY) else "default"}
                             return
                     for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
                         self._seen.get(key, {}).pop("snmp", None)
@@ -641,6 +643,20 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if table:
                 tables[hub["id"]] = table
         return tables
+
+    async def _read_ap_clients(self) -> dict[str, str]:
+        """Read the Wi-Fi client list from every Grandstream access point hub: {client mac: hub id}."""
+        out: dict[str, str] = {}
+        for hub in self.opts[CONF_HUBS]:
+            host = hub.get("host")
+            info = self._snmp_info(hub)
+            if not host or not info or info.get("bridge") or not is_grandstream(info.get("object_id"), info.get("descr")):
+                continue
+            comm = self._communities()[0] if info.get("community") == "custom" else SNMP_DEFAULT_COMMUNITY
+            clients = await self._snmp.wireless_clients(host, comm)
+            for mac in clients or ():
+                out.setdefault(mac, hub["id"])
+        return out
 
     def _snmp_info(self, hub: dict[str, Any]) -> dict[str, Any] | None:
         info = (self._seen.get(f"hub:{hub['id']}") or {}).get("snmp")
@@ -773,6 +789,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         if hub:
             rec["auto"] = {"hub": hub, "source": PLACE_CONTROLLER, "at": now.isoformat()}
             return hub, PLACE_CONTROLLER
+        ap_hub = self._ap_clients.get(mac) if mac else None
+        if ap_hub:
+            rec["auto"] = {"hub": ap_hub, "source": PLACE_SNMP, "at": now.isoformat()}
+            return ap_hub, PLACE_SNMP
         auto = rec.get("auto")
         if auto and auto.get("at") and now - datetime.fromisoformat(auto["at"]) < AUTO_PLACEMENT_TTL:
             return auto.get("hub"), auto.get("source", PLACE_SNMP)
@@ -898,7 +918,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 ip_changes=rec.get("ip_changes", 0),
                 vendor=(self._seen.get(hub.get("mac") or "") or {}).get("vendor"),
             )
-        if self._tables:
+        if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
         if self._controller_ap:
             sources.add(PLACE_CONTROLLER)

@@ -7,6 +7,7 @@
 - A brand new install finishes setup right away and fills the map once the first scan is done.
 
 ### Added
+- **Grandstream GWN access points over SNMP.** NetOrbit reads the Wi-Fi client table (`GRANDSTREAM-GWN-MIB`) from Grandstream access points that you have as hubs, and places those clients under the access point they are connected to. Not yet tested on real Grandstream hardware. Thanks to @fluffymadness for the request and the MIB details (#18).
 - Scan progress on `sensor.netorbit_devices_online`: `scanning`, `scan_phase`, `scan_progress`, `found` and `first_scan_done`. They change a few times per scan, for the first scan and for the regular ones, and stay out of the history database (`first_scan_done` aside).
 
 ## 0.2.8
