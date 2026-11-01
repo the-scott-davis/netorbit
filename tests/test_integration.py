@@ -148,7 +148,7 @@ async def test_stale_and_recovered(hass: HomeAssistant, fake_net, freezer: Froze
     await _advance(hass, freezer, 61)
     assert _node_states(hass)[name].state == "recent"
 
-    await _advance(hass, freezer, 25*3600)
+    await _advance(hass, freezer, 25 * 3600)
     assert _node_states(hass)[name].state == "stale"
     assert [e.data["name"] for e in stale] == [name]
 
@@ -178,7 +178,7 @@ async def test_addressless_hubs_follow_what_is_behind_them(hass: HomeAssistant, 
     assert states() == {"Desk PC": "online", "Bed Switch": "online", "Shop Switch": "online", "Spare Switch": "unknown"}
 
     # well past the window, still green while the device behind them answers
-    await _advance(hass, freezer, 25*3600)
+    await _advance(hass, freezer, 25 * 3600)
     assert states() == {"Desk PC": "online", "Bed Switch": "online", "Shop Switch": "online", "Spare Switch": "unknown"}
     assert stale == []
 
@@ -186,7 +186,7 @@ async def test_addressless_hubs_follow_what_is_behind_them(hass: HomeAssistant, 
     fake_net.alive.discard("192.0.2.11")
     await _advance(hass, freezer, 61)
     assert states()["Shop Switch"] == "recent"
-    await _advance(hass, freezer, 25*3600)
+    await _advance(hass, freezer, 25 * 3600)
     assert states() == {"Desk PC": "stale", "Bed Switch": "stale", "Shop Switch": "stale", "Spare Switch": "unknown"}
     assert sorted(e.data["name"] for e in stale) == ["Bed Switch", "Desk PC", "Shop Switch"]
 
@@ -201,7 +201,7 @@ async def test_addressless_hub_recovers_with_the_device_behind_it(hass: HomeAssi
 
     fake_net.alive.discard("192.0.2.11")
     await _advance(hass, freezer, 61)
-    await _advance(hass, freezer, 25*3600)
+    await _advance(hass, freezer, 25 * 3600)
     nodes = _node_states(hass)
     assert (nodes["Desk PC"].state, nodes["Shop Switch"].state) == ("stale", "stale")
     assert back == []
@@ -228,7 +228,7 @@ async def test_addressless_hub_with_only_a_sleeping_device_stays_grey(hass: Home
     await _advance(hass, freezer, 61)
     nodes = _node_states(hass)
     assert (nodes["Shop TV"].state, nodes["Shop Switch"].state) == ("recent", "unknown")
-    await _advance(hass, freezer, 25*3600)
+    await _advance(hass, freezer, 25 * 3600)
     nodes = _node_states(hass)
     assert (nodes["Shop TV"].state, nodes["Shop Switch"].state) == ("stale", "unknown")
     assert stale == []
@@ -250,13 +250,13 @@ async def test_addressless_hub_follows_a_pingable_hub_behind_it(hass: HomeAssist
         return nodes["Shop AP"].state, nodes["Shop Switch"].state
 
     assert states() == ("online", "online")
-    await _advance(hass, freezer, 25*3600)
+    await _advance(hass, freezer, 25 * 3600)
     assert states() == ("online", "online")
 
     fake_net.alive.discard("192.0.2.5")
     await _advance(hass, freezer, 61)
     assert states() == ("recent", "recent")
-    await _advance(hass, freezer, 25*3600)
+    await _advance(hass, freezer, 25 * 3600)
     assert states() == ("stale", "stale")
     assert sorted(e.data["name"] for e in stale) == ["Shop AP", "Shop Switch"]
 
