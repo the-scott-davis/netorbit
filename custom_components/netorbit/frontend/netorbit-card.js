@@ -970,7 +970,7 @@ class NetOrbitCard extends HTMLElement {
       const icon = reg.icon || a.icon || "mdi:lan-connect";
       const n = {
         // A name set in Home Assistant's entity settings wins over NetOrbit's own name.
-        key: a.node_key, entity: s.entity_id, label: reg.name || a.label || a.friendly_name, ip: a.ip, mac: a.mac, ip_changes: a.ip_changes || 0,
+        key: a.node_key, entity: s.entity_id, label: reg.name || a.label || a.friendly_name, reg_name: reg.name || "", ip: a.ip, mac: a.mac, ip_changes: a.ip_changes || 0,
         kind: a.kind, link: a.link, parent: a.link, sleepy: a.sleepy === true, last_seen: a.last_seen,
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
         status: NO_STATUS[s.state] ? s.state : "unknown",
@@ -2016,19 +2016,20 @@ class NetOrbitCard extends HTMLElement {
     q(".mk").addEventListener("click", () => { const t = q(".type").value; this._closePop(wrap); this._call("confirm_hub", { device: this._ref(n), type: t }); });
   }
 
-  // Name a device. NetOrbit's own name goes first: it is keyed by MAC address, so it follows the device across IP
-  // changes, and it is what backups, services and AI assistants see. Then the same name goes on the sensor's
-  // Home Assistant entity name, which the map reads first, so Home Assistant and the map agree. An empty name clears both.
+  // Name a device. The name is NetOrbit's own, keyed by MAC address: it follows the device across IP changes, it is
+  // what backups, services and AI assistants see, and the sensor's Home Assistant name follows it by itself. The card
+  // never creates a Home Assistant entity name. Only when someone already set one in the entity settings (it wins
+  // over NetOrbit's name on the map) is it updated too, so the new name shows. An empty name clears both.
   _rename(n, name) {
     const data = { name };
     if (n.mac) data.mac = n.mac;
     else if (n.ip) data.ip = n.ip;
     else { this._notify("This device has no MAC or IP address to name it by."); return Promise.resolve(false); }
     return this._call("track_device", data).then((ok) => {
-      if (!ok || !n.entity) return ok;
+      if (!ok || !n.entity || !n.reg_name) return ok;
       return this._hass.callWS({ type: "config/entity_registry/update", entity_id: n.entity, name: name || null }).then(() => true, (e) => {
         console.error("NetOrbit:", e);
-        this._notify(`NetOrbit saved the name, but Home Assistant's entity name was not updated: ${(e && e.message) || e}`);
+        this._notify(`NetOrbit saved the name, but the name set in Home Assistant's entity settings was not changed: ${(e && e.message) || e}`);
         return false;
       });
     });
