@@ -23,6 +23,7 @@
 - A mouse button released just outside the map no longer leaves the map panning whenever the mouse moves over it.
 - A Home Assistant update that arrives while you tap or press the map is drawn when you let go. Before, it waited for the next update.
 - Ctrl+scroll zooms at the same speed in Firefox, which reports scroll in lines.
+- Hubs with no IP (an unmanaged switch, or an access point in bridge mode) no longer turn red once the "not seen" window passes. NetOrbit can't ping them, so they now take their status from the devices behind them: green while anything behind them answers, red only once nothing behind them has been seen for the window, grey when nothing is behind them. Before, they went red (and fired `netorbit_device_stale`) a day after being added, whatever was behind them.
 
 ## 0.2.8
 

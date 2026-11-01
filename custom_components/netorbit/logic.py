@@ -67,6 +67,20 @@ def compute_status(
     return STATUS_STALE
 
 
+def rollup_status(children: list[tuple[str, bool]]) -> str:
+    """Status for a hub with no address, from the (status, sleepy) of what's behind it.
+
+    Online if anything behind it is online, seen recently if anything was, and not seen only when
+    everything behind it is stale. Sleepy devices that are off don't count, so a switch with only a
+    TV behind it doesn't turn red. Empty ("unknown") when nothing behind it says either way.
+    """
+    statuses = {status for status, sleepy in children if status == STATUS_ONLINE or not sleepy}
+    for status in (STATUS_ONLINE, STATUS_RECENT, STATUS_STALE):
+        if status in statuses:
+            return status
+    return ""
+
+
 def guess_icon(name: str | None, default: str = "mdi:lan-connect") -> str:
     """Pick a sensible icon from a device name or hostname."""
     if not name:

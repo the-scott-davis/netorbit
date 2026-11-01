@@ -182,6 +182,8 @@ Under the integration's **Configure** menu:
 
 **Allowed to sleep** is for TVs, consoles and anything else that's off a lot. They still show their status but never fire the stale event.
 
+**Hubs with no IP**, such as an unmanaged switch or an access point in bridge mode, can't be pinged, so they take their status from what's behind them: green if anything behind them is online, yellow if something was seen recently, red only when nothing behind them has been seen for the "not seen" window, and grey when nothing is behind them yet. Sleeping devices that are off don't count.
+
 **The internet check** (on by default) puts an Internet node just above your router. Each ping round also pings two public DNS servers, Cloudflare's `1.1.1.1` and Google's `8.8.8.8`. The node turns red ("Internet down") when neither answers for two rounds in a row while your router still answers, so you can tell an internet outage from a Wi-Fi problem. If the router isn't answering either, it shows grey, because NetOrbit can't tell. Turn it off under **Settings** if you'd rather NetOrbit never sends anything outside your network.
 
 ### DHCP, MAC addresses and keeping your setup
@@ -233,7 +235,7 @@ Hover a device for details, tap it for its history. Pinch or double-tap to zoom 
 
 ## Entities, events and services
 
-- One sensor per hub and tracked device. State is `online`, `recent` or `stale`. Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
+- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
 - `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`. While a network scan runs it also shows `scanning: true`, the current `scan_phase` (`ping`, `arp`, `names`, `snmp`, `layout`), a rough `scan_progress` (0 to 100) and how many addresses it has `found` so far. `first_scan_done` turns true once the very first scan on this install has finished.
 - `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
