@@ -735,6 +735,65 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     }
   }
 
+  // 16. Move a hub under another hub with "Connected to" (move a switch from the router to an access point).
+  {
+    const hp = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    hp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await hp.goto(BASE + "/scripts/preview/index.html?s=full");
+    await hp.waitForFunction(() => window.ready);
+    const c7 = hp.locator("netorbit-card");
+    await c7.locator(".editbtn").click();
+    const opts = async () => c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.value).sort());
+    // The router has no parent to pick.
+    await c7.locator('.node.hub[data-key="hub:gateway"] circle.disc').click({ force: true });
+    assert.strictEqual(await c7.locator(".pop select.parent").count(), 0, "the router has no Connected to picker");
+    await c7.locator(".pop .x").click();
+    // A hub's own descendants are not offered, and neither is the hub itself.
+    await c7.locator('.node.hub[data-key="hub:core"] circle.disc').click({ force: true });
+    assert.deepStrictEqual(await opts(), ["gateway"], "a switch is offered only hubs that are not below it");
+    await c7.locator(".pop .x").click();
+    // Office Switch hangs off Core Switch. Move it under Hallway AP.
+    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    assert.ok((await c7.locator(".pop label", { hasText: "Connected to" }).count()) === 1, "picker is labelled Connected to");
+    assert.strictEqual(await c7.locator(".pop select.parent").inputValue(), "core", "current parent is selected");
+    assert.deepStrictEqual(await opts(), ["core", "down", "garage", "gateway", "up"], "every other real hub is offered, no group or New devices hub");
+    await c7.locator(".pop select.parent").selectOption("up");
+    await c7.locator(".pop .save").click();
+    const hc = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc.at(-1).slice(1), ["update_hub", { hub: "office", parent: "up", config_entry_id: "preview" }]);
+    // Saving without touching Connected to sends no parent.
+    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    await c7.locator(".pop input.name").fill("Desk Switch");
+    await c7.locator(".pop .save").click();
+    const hc2 = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc2.at(-1).slice(1), ["update_hub", { hub: "office", name: "Desk Switch", config_entry_id: "preview" }]);
+    // Two hubs with the same name are told apart by their address.
+    await hp.evaluate(() => { const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === "hub:down"); st.attributes.label = "Hallway AP"; window.pushHass(); });
+    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    const names = await c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.textContent));
+    assert.strictEqual(names.filter((t) => t.startsWith("Hallway AP (192.0.2.")).length, 2, "same-name hubs show their address: " + names.join("|"));
+    assert.ok(names.includes("Core Switch"), "a unique name stays plain");
+    await c7.locator(".pop .x").click();
+    // A hub whose parent no longer exists shows the router, and saving without a change sends no parent.
+    await hp.evaluate(() => { const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === "hub:office"); st.attributes.link = "hub:ghost"; window.pushHass(); });
+    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    assert.strictEqual(await c7.locator(".pop select.parent").inputValue(), "gateway", "a missing parent falls back to the router");
+    await c7.locator(".pop input.name").fill("Desk Switch 2");
+    await c7.locator(".pop .save").click();
+    const hc3 = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc3.at(-1).slice(1), ["update_hub", { hub: "office", name: "Desk Switch 2", config_entry_id: "preview" }]);
+    // Bad data with a loop (Core under Office, Office under Core) still opens the picker, and a hub in the loop is not offered itself.
+    await hp.evaluate(() => { const find = (k) => Object.values(window.card._hass.states).find((x) => x.attributes.node_key === k); find("hub:office").attributes.link = "hub:core"; find("hub:core").attributes.link = "hub:office"; window.pushHass(); });
+    await c7.locator('.node.hub[data-key="hub:up"] circle.disc').click({ force: true });
+    assert.ok((await opts()).includes("gateway"), "the picker opens on looped data");
+    await c7.locator(".pop .x").click();
+    await c7.locator('.node.hub[data-key="hub:core"] circle.disc').click({ force: true });
+    assert.ok(!(await opts()).includes("core") && !(await opts()).includes("office"), "a looped hub is not offered itself or its loop partner");
+    await c7.locator(".pop .x").click();
+    console.log("hub parent picker ok:", JSON.stringify(hc.at(-1)[2]));
+    await hp.close();
+  }
+
   await browser.close();
   console.log("ALL INTERACTIONS PASSED");
 })().catch((e) => { console.error(e); process.exit(1); });

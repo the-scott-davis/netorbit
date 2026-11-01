@@ -1225,7 +1225,7 @@ class NetOrbitCard extends HTMLElement {
     ${share ? `<button class="sharebtn" title="Share an image or video of your map"><ha-icon icon="mdi:share-variant"></ha-icon>Share</button>` : ""}
     ${admin ? `<button class="editbtn ${edit ? "on" : ""}"><ha-icon icon="${edit ? "mdi:check" : "mdi:pencil"}"></ha-icon>${edit ? "Done" : "Edit layout"}</button>` : ""}`}
   </div>
-  ${edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename or remove it.</div>` : ""}
+  ${edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename it, change its type, move it under another hub, or remove it.</div>` : ""}
   <div class="wrap">
     <svg class="map" viewBox="${NO_VIEW.x} ${NO_VIEW.y} ${NO_VIEW.w} ${NO_VIEW.h}" role="img" aria-label="Network map">
       <defs><filter id="noblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>
@@ -1729,7 +1729,7 @@ class NetOrbitCard extends HTMLElement {
         if (n.suggested && this._isAdmin()) { this._suggestPopup(n, ev, wrap, place); return; }
         if (n.kind === "new") { this._newPopup(n, ev, wrap, place); return; }
         if (n.kind === "more") { this._morePopup(n, ev, wrap, place); return; }
-        if (this._edit && n.kind === "hub") { this._hubPopup(n, ev, wrap, place, n.key === root); return; }
+        if (this._edit && n.kind === "hub") { this._hubPopup(n, ev, wrap, place, n.key === root, hubs, root); return; }
         if (n.entity) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: n.entity }, bubbles: true, composed: true }));
       });
     });
@@ -1969,26 +1969,50 @@ class NetOrbitCard extends HTMLElement {
     q(".mk").addEventListener("click", () => { const t = q(".type").value; this._closePop(wrap); this._call("confirm_hub", { device: this._ref(n), type: t }); });
   }
 
-  _hubPopup(n, ev, wrap, place, isRoot) {
+  // Hubs a hub can hang off: the router and every other real hub, except itself and the hubs below it.
+  _parentOptions(n, hubs, root) {
+    const below = (h) => {
+      let cur = h, guard = 0;
+      while (cur && guard++ < 100) {
+        if (cur.key === n.key) return true;
+        cur = hubs[cur.parent];
+      }
+      return false;
+    };
+    const list = Object.values(hubs).filter((h) => h.kind === "hub" && !below(h))
+      .sort((a, b) => (a.key === root ? -1 : b.key === root ? 1 : String(a.label).localeCompare(String(b.label))));
+    const now = hubs[n.parent] && list.indexOf(hubs[n.parent]) >= 0 ? n.parent : root;
+    // Two hubs with the same name get their address added, so they can be told apart.
+    const seen = {};
+    list.forEach((h) => { const k = String(h.label).toLowerCase(); seen[k] = (seen[k] || 0) + 1; });
+    const text = (h) => (seen[String(h.label).toLowerCase()] > 1 ? `${h.label} (${h.ip || h.key.replace(/^hub:/, "")})` : h.label);
+    return { now, html: list.map((h) => `<option value="${noEsc(h.key.replace(/^hub:/, ""))}" ${h.key === now ? "selected" : ""}>${noEsc(text(h))}</option>`).join("") };
+  }
+
+  _hubPopup(n, ev, wrap, place, isRoot, hubs, root) {
     const cur = NO_HUB_TYPE[n.hub_type] ? n.hub_type : "other";
+    const par = isRoot ? null : this._parentOptions(n, hubs, root);
     const types = Object.entries(NO_HUB_TYPE).filter(([k]) => k !== "router" || isRoot)
       .map(([k, v]) => `<option value="${k}" ${k === cur ? "selected" : ""}>${v}</option>`).join("");
     const pop = this._openPop(
       `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(NO_HUB_TYPE[n.hub_type] || "Hub")}</div>` +
       `<label>Name<input class="name" value="${noEsc(n.label)}"></label>` +
       (isRoot ? "" : `<label>Type<select class="type">${types}</select></label>`) +
+      (isRoot ? "" : `<label>Connected to<select class="parent">${par.html}</select></label>`) +
       `<div class="row"><button class="go save">Save</button>${isRoot ? "" : `<button class="warn rm">Remove</button>`}<button class="x">Close</button></div>`,
-      ev, wrap, place, 250, isRoot ? 160 : 210
+      ev, wrap, place, 250, isRoot ? 160 : 270
     );
     const q = (s) => pop.querySelector(s);
     q(".save").addEventListener("click", () => {
       const name = q(".name").value.trim();
       const type = q(".type") ? q(".type").value : cur;
+      const parent = q(".parent") ? q(".parent").value : "";
       this._closePop(wrap);
       const data = { hub: n.key.replace(/^hub:/, "") };
       if (name && name !== n.label) data.name = name;
       if (type !== cur) data.type = type;
-      if (data.name || data.type) this._call("update_hub", data);
+      if (par && parent && "hub:" + parent !== par.now) data.parent = parent;
+      if (data.name || data.type || data.parent) this._call("update_hub", data);
     });
     if (q(".rm")) q(".rm").addEventListener("click", () => { this._closePop(wrap); this._call("remove_hub", { hub: n.key.replace(/^hub:/, "") }); });
   }
