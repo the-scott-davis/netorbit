@@ -53,13 +53,23 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "24" # current LTS for the browser tests; nothing in them needs it, the unit-test job above stays on 22
       - name: Install Playwright and the icon set the preview uses
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.63.0 @mdi/js@7.4.47
           cp node_modules/@mdi/js/mdi.js scripts/preview/mdi.js
+      - name: Cache the browser
+        id: browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.63.0-${{ runner.os }}-${{ matrix.browser }}
       - name: Install the browser
+        if: steps.browsers.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Install browser system libraries
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps ${{ matrix.browser }}
       - name: Serve the repository
         run: |
           python3 -m http.server 8766 > /dev/null 2>&1 &

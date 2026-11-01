@@ -239,6 +239,7 @@ class NetOrbitCard extends HTMLElement {
     // Never redraw under the user's finger. A zoom gesture whose end was never seen (a lost pointer event)
     // stops holding updates back after 15 s.
     if (this._drag || this._popOpen) return;
+    // _held is set only here: a drag or an open popup redraws by itself when it finishes (a drop moves the device or clears _sig, closing the popup redraws).
     if (this._zooming && Date.now() - this._zooming < 15000) { this._held = true; return; }
     this._held = false;
     const model = this._model();
@@ -897,8 +898,9 @@ class NetOrbitCard extends HTMLElement {
       if (!g.moved && Math.hypot(m.x - g.m.x, m.y - g.m.y) < 6 && Math.abs(m.d - g.m.d) < 6) return;
       g.moved = true;
       this._zooming = Date.now();
-      // Keep the events coming when the pointer leaves the map. Touches are captured by their first target already.
-      if (!g.captured) { g.captured = true; fingers.forEach((_, id) => { try { svg.setPointerCapture(id); } catch (e) { /* pointer gone */ } }); }
+      // Keep the events coming when the pointer leaves the map. Touches are captured by their first target already,
+      // and taking that capture over would end the pan, so only a mouse is captured here.
+      if (!g.captured && ev.pointerType === "mouse") { g.captured = true; try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* pointer gone */ } }
       const factor = g.m.d && m.d ? m.d / g.m.d : 1;
       this._view = netorbitZoomView(g.view, g.anchor, toMap(m.x, m.y, g.inv), factor);
       apply();
@@ -925,7 +927,8 @@ class NetOrbitCard extends HTMLElement {
     };
     svg.addEventListener("pointerup", end);
     svg.addEventListener("pointercancel", end);
-    svg.addEventListener("lostpointercapture", end);
+    // Only the svg's own capture ending counts. A device or hub circle losing its implicit touch capture bubbles up here too.
+    svg.addEventListener("lostpointercapture", (ev) => { if (ev.target === svg) end(ev); });
     // A pan or pinch is not a tap on whatever node the finger started on.
     svg.addEventListener("click", (ev) => {
       if (!this._swallowClick) return;

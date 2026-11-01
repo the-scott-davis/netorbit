@@ -1,15 +1,17 @@
-// Browser test of edit mode and zoom: node scripts/preview/interact.js (needs playwright and a server on :8766).
+// Browser test of edit mode and zoom: node scripts/preview/interact.js (needs playwright and a server on :8766,
+// or on the address in NETORBIT_PREVIEW).
 // BROWSER=webkit runs it in WebKit (the touch cases that need Chrome's DevTools protocol are skipped there).
 const { chromium, webkit } = require("playwright");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const IS_WEBKIT = process.env.BROWSER === "webkit";
+const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/\/+$/, "");
 (async () => {
   const browser = await (IS_WEBKIT ? webkit : chromium).launch();
   const page = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
   page.setDefaultTimeout(8000);
   page.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-  await page.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+  await page.goto(BASE + "/scripts/preview/index.html?s=novice");
   await page.waitForFunction(() => window.ready);
   const card = page.locator("netorbit-card");
   const center = async (sel) => {
@@ -100,7 +102,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   // 8. Touch: drag with a finger on a phone sized screen.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(8000);
-  await phone.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+  await phone.goto(BASE + "/scripts/preview/index.html?s=novice");
   await phone.waitForFunction(() => window.ready);
   const c2 = phone.locator("netorbit-card");
   await c2.locator(".editbtn").click();
@@ -111,7 +113,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   // 8b. A flick: press, one move partway, release on the hub with no move there.
   {
     const fl = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
-    await fl.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await fl.goto(BASE + "/scripts/preview/index.html?s=novice");
     await fl.waitForFunction(() => window.ready);
     const c4 = fl.locator("netorbit-card");
     await c4.locator(".editbtn").click();
@@ -138,7 +140,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   // 9. Drag still lands on a narrower card (tablets, side panels).
   for (const w of [760, 600]) {
     const nar = await browser.newPage({ viewport: { width: w, height: 1000 } });
-    await nar.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await nar.goto(BASE + "/scripts/preview/index.html?s=novice");
     await nar.waitForFunction(() => window.ready);
     const c3 = nar.locator("netorbit-card");
     await c3.locator(".editbtn").click();
@@ -156,7 +158,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   {
     const sp = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
     sp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-    await sp.goto("http://localhost:8766/scripts/preview/index.html?s=novice");
+    await sp.goto(BASE + "/scripts/preview/index.html?s=novice");
     await sp.waitForFunction(() => window.ready);
     const c5 = sp.locator("netorbit-card");
     await c5.locator(".editbtn").click();
@@ -191,7 +193,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   for (const [q, want] of [["", "online"], ["&internet=down", "stale"], ["&internet=off", null]]) {
     const ip = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
     ip.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
-    await ip.goto("http://localhost:8766/scripts/preview/index.html?s=novice" + q);
+    await ip.goto(BASE + "/scripts/preview/index.html?s=novice" + q);
     await ip.waitForFunction(() => window.ready);
     const c6 = ip.locator("netorbit-card");
     const node = c6.locator('.node.inet[data-key="internet"]');
@@ -211,7 +213,7 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
   }
 
   // 12. Zoom and pan. Each case gets a fresh page.
-  const URL = "http://localhost:8766/scripts/preview/index.html?s=novice";
+  const URL = BASE + "/scripts/preview/index.html?s=novice";
   const open = async (opts = {}, query = "") => {
     const p = await browser.newPage(Object.assign({ viewport: { width: 1008, height: 1100 } }, opts));
     p.setDefaultTimeout(8000);
@@ -448,7 +450,13 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
     await touch("touchStart", [{ x: bg.x, y }]);
     for (let i = 0; i < 12; i++) { y -= 14; await touch("touchMove", [{ x: bg.x, y }]); await wait(16); }
     await touch("touchEnd", []);
-    await wait(400);
+    // Wait for the fling to come to rest: scrollY is the same on three animation frames in a row.
+    await p.waitForFunction(() => {
+      const w = window, y = w.scrollY;
+      if (w.__lastY === y) w.__still = (w.__still || 0) + 1; else w.__still = 0;
+      w.__lastY = y;
+      return w.__still >= 3;
+    }, null, { polling: "raf" });
     assert.ok((await p.evaluate(() => window.scrollY)) > 60, "a one-finger swipe over the whole map scrolls the page");
     assert.strictEqual(await viewBox(p), whole, "and leaves the map alone");
     await p.evaluate(() => window.scrollTo(0, 0));
@@ -464,16 +472,41 @@ const IS_WEBKIT = process.env.BROWSER === "webkit";
     assert.ok((await viewW(p)) < Number(whole.split(" ")[2]) * 0.7, "a pinch zooms the map");
     assert.ok(Math.abs(await p.evaluate(() => window.scrollY)) < 5, "and does not scroll the page");
 
-    // Zoomed in, one finger pans the map instead of the page.
-    const zoomed = await viewBox(p);
-    const b3 = await mapBox(p);
-    let x = b3.x + b3.width / 2;
-    await touch("touchStart", [{ x, y: cy }]);
-    for (let i = 0; i < 10; i++) { x -= 12; await touch("touchMove", [{ x, y: cy }]); await wait(16); }
-    await touch("touchEnd", []);
-    await wait(200);
-    assert.notStrictEqual(await viewBox(p), zoomed, "zoomed in, one finger pans the map");
-    assert.ok(Math.abs(await p.evaluate(() => window.scrollY)) < 5, "and the page stays put");
+    // Zoomed in, one finger pans the map instead of the page. A drag of 120 px should move the view by about
+    // 120 px worth of map units, whether it starts on the background or on a device circle.
+    const vbOf = async () => (await viewBox(p)).split(" ").map(Number);
+    const pan = async (from, label) => {
+      const before = await vbOf();
+      const bx = await mapBox(p);
+      const unitsPerPx = Math.max(before[2] / bx.width, before[3] / bx.height);
+      let x = from.x;
+      await touch("touchStart", [{ x, y: from.y }]);
+      for (let i = 0; i < 10; i++) { x -= 12; await touch("touchMove", [{ x, y: from.y }]); await wait(16); }
+      await touch("touchEnd", []);
+      await wait(200);
+      const after = await vbOf();
+      const want = 120 * unitsPerPx, got = after[0] - before[0];
+      assert.ok(got > want * 0.5, `${label}: one finger pans the map by about the finger distance (moved ${got.toFixed(1)} of ${want.toFixed(1)} units)`);
+      assert.ok(Math.abs(after[2] - before[2]) < 0.01, `${label}: and does not change the zoom`);
+      assert.ok(Math.abs(await p.evaluate(() => window.scrollY)) < 5, `${label}: and the page stays put`);
+    };
+    // A device circle well inside the visible map, with room to drag 120 px to the left of it.
+    const onDevice = await p.evaluate(() => {
+      const root = document.querySelector("netorbit-card").shadowRoot, r = root.querySelector("svg.map").getBoundingClientRect();
+      for (const c of root.querySelectorAll(".node circle.disc")) {
+        const b = c.getBoundingClientRect(), x = b.x + b.width / 2, y = b.y + b.height / 2;
+        if (x > r.left + 140 && x < r.right - 20 && y > r.top + 20 && y < r.bottom - 20 && y < innerHeight - 20) {
+          const hit = root.elementFromPoint(x, y);
+          if (hit && hit.closest && hit.closest(".node")) return { x, y };
+        }
+      }
+      return null;
+    });
+    assert.ok(onDevice, "found a device circle inside the zoomed map");
+    await pan(onDevice, "from a device");
+    const bg2 = await backgroundPoint(p);
+    assert.ok(bg2, "found a background spot in the zoomed map");
+    await pan({ x: Math.max(bg2.x, (await mapBox(p)).x + 140), y: bg2.y }, "from the background");
     console.log("phone touch ok: swipe scrolls, tap opens details, pinch zooms, drag pans");
     await p.close();
   }
