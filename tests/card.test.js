@@ -85,6 +85,10 @@ test("height takes pixels or a CSS length, and nothing that could leave the styl
   assert.strictEqual(noHeight("80vh"), "80vh");
   assert.strictEqual(noHeight("min(1200px, 90vh)"), "min(1200px, 90vh)");
   assert.strictEqual(noHeight("100px; } svg { display:none"), "900px");
+  assert.strictEqual(noHeight("100px /*"), "900px");
+  assert.strictEqual(noHeight("100px */"), "900px");
+  assert.strictEqual(noHeight(true), "900px");
+  assert.strictEqual(noHeight(false), "900px");
   assert.strictEqual(noHeight("1px</style><img src=x onerror=alert(1)>"), "900px");
   assert.strictEqual(noHeight("url('x')"), "900px");
 });

@@ -58,10 +58,12 @@ function noTrunc(s, n) {
 /** The map's max height: pixels, or a CSS length like "calc(100vh - 180px)". Anything else is 900px.
  * It lands in a <style> block, so only characters a length needs get through (no ; : { } < > or quotes). */
 function noHeight(v) {
+  if (typeof v === "boolean") return "900px";
   const n = Number(v);
   if (v !== "" && v != null && Number.isFinite(n)) return n > 0 ? `${n}px` : "900px";
   const s = String(v == null ? "" : v).trim();
   if (!/^[a-z0-9\s.,%()+*/-]+$/i.test(s)) return "900px";
+  if (s.indexOf("/*") !== -1 || s.indexOf("*/") !== -1) return "900px";
   if (typeof CSS !== "undefined" && CSS.supports && !CSS.supports("max-height", s)) return "900px";
   return s;
 }
@@ -892,7 +894,10 @@ class NetOrbitCard extends HTMLElement {
     this._hass = hass;
     // Never redraw under the user's finger. A zoom gesture whose end was never seen (a lost pointer event)
     // stops holding updates back after 15 s.
-    if (this._drag || this._popOpen || this._revealing || (this._zooming && Date.now() - this._zooming < 15000)) return;
+    if (this._drag || this._popOpen || this._revealing) return;
+    // _held is set only here: a drag, an open popup or a reveal redraws by itself when it finishes (a drop moves the device or clears _sig, closing the popup redraws).
+    if (this._zooming && Date.now() - this._zooming < 15000) { this._held = true; return; }
+    this._held = false;
     const model = this._model();
     const mode = netorbitScanMode(model.summary && model.summary.attributes);
     if (mode === "takeover") {
@@ -1241,7 +1246,7 @@ class NetOrbitCard extends HTMLElement {
     <span><i class="dot" style="background:#a78bfa"></i>Allowed to sleep</span>
     ${nSug ? `<span><i class="dot" style="background:${NO_SUGGEST.color}"></i>Might be a hub, tap to confirm</span>` : ""}
     ${grouped ? `<span>Grouped by type until NetOrbit knows where they connect</span>` : ""}
-    ${cfg.zoom !== false ? `<span>Pinch, double-tap or Ctrl+scroll to zoom</span>` : ""}
+    ${cfg.zoom !== false ? `<span>Pinch, double-tap or Ctrl/Cmd+scroll to zoom</span>` : ""}
   </div>` : ""}
 </ha-card>`;
 
@@ -1767,8 +1772,10 @@ class NetOrbitCard extends HTMLElement {
       const inv = inverse();
       if (!inv) return;
       ev.preventDefault();
-      // A trackpad pinch arrives as many small deltas; a mouse wheel notch is capped to about 1.6x.
-      zoomBy(Math.exp(Math.max(-0.5, Math.min(0.5, -ev.deltaY * 0.01))), toMap(ev.clientX, ev.clientY, inv));
+      // A trackpad pinch arrives as many small deltas; a mouse wheel notch is capped to about 1.6x. Firefox can
+      // report lines (1) or pages (2) instead of pixels.
+      const dy = ev.deltaY * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? window.innerHeight || 800 : 1);
+      zoomBy(Math.exp(Math.max(-0.5, Math.min(0.5, -dy * 0.01))), toMap(ev.clientX, ev.clientY, inv));
     }, { passive: false });
     // Safari: a pinch over the map must not zoom the page as well, and two fingers must not scroll it.
     ["gesturestart", "gesturechange"].forEach((t) => svg.addEventListener(t, (ev) => ev.preventDefault()));
@@ -1800,13 +1807,16 @@ class NetOrbitCard extends HTMLElement {
     });
     svg.addEventListener("pointermove", (ev) => {
       if (!g || !fingers.has(ev.pointerId) || this._drag) return;
+      // A mouse button released just outside the map before any capture was taken never reaches us as a pointerup.
+      if (ev.pointerType === "mouse" && !(ev.buttons & 1)) { end(ev); return; }
       fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       const m = mid();
       if (!g.moved && Math.hypot(m.x - g.m.x, m.y - g.m.y) < 6 && Math.abs(m.d - g.m.d) < 6) return;
       g.moved = true;
       this._zooming = Date.now();
-      // Keep the events coming when the pointer leaves the map. Touches are captured by their first target already.
-      if (!g.captured) { g.captured = true; fingers.forEach((_, id) => { try { svg.setPointerCapture(id); } catch (e) { /* pointer gone */ } }); }
+      // Keep the events coming when the pointer leaves the map. Touches are captured by their first target already,
+      // and taking that capture over would end the pan, so only a mouse is captured here.
+      if (!g.captured && ev.pointerType === "mouse") { g.captured = true; try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* pointer gone */ } }
       const factor = g.m.d && m.d ? m.d / g.m.d : 1;
       this._view = netorbitZoomView(g.view, g.anchor, toMap(m.x, m.y, g.inv), factor);
       apply();
@@ -1828,10 +1838,13 @@ class NetOrbitCard extends HTMLElement {
           if (this._view) { this._view = null; apply(); } else if (inv) zoomBy(2.5, toMap(ev.clientX, ev.clientY, inv));
         } else lastTap = { t: ev.timeStamp, x: ev.clientX, y: ev.clientY };
       }
-      if (acted && this._hass) this.hass = this._hass; // draw whatever changed during the gesture
+      // Draw whatever changed during the gesture, or arrived while a plain tap or press was holding updates back.
+      if ((acted || this._held) && this._hass) { this._held = false; this.hass = this._hass; }
     };
     svg.addEventListener("pointerup", end);
     svg.addEventListener("pointercancel", end);
+    // Only the svg's own capture ending counts. A device or hub circle losing its implicit touch capture bubbles up here too.
+    svg.addEventListener("lostpointercapture", (ev) => { if (ev.target === svg) end(ev); });
     // A pan or pinch is not a tap on whatever node the finger started on.
     svg.addEventListener("click", (ev) => {
       if (!this._swallowClick) return;
