@@ -381,10 +381,11 @@ const NO_SCAN_PHASE = {
 };
 
 /** What the card shows for a network scan, from the summary sensor's attributes: "takeover" while the very first
- * scan on an install runs, "chip" for a later scan, "none" otherwise (and for older versions without these). */
+ * scan on an install is running, "chip" for a later scan, "none" otherwise (and for older versions without these).
+ * A first scan that is not running (it failed or has not started) never hides the map. */
 function netorbitScanMode(attrs) {
   const a = attrs || {};
-  if (a.first_scan_done === false) return "takeover";
+  if (a.first_scan_done === false && a.scanning === true) return "takeover";
   if (a.scanning === true) return "chip";
   return "none";
 }
@@ -499,8 +500,30 @@ function noShareType(icon) {
   return "Device";
 }
 
-// Anything that looks like an IPv4 address or (part of) a MAC address.
-const NO_ADDRESS_RE = /\b\d{1,3}(\.\d{1,3}){3}\b|\b[0-9a-f]{2}([:-][0-9a-f]{2})+\b/i;
+// Anything that looks like an IPv4 or IPv6 address or a MAC address, whole or in part. Word boundaries (\b) do not
+// work here because "_" counts as a word character ("Cam_192.0.2.7"), so a match must sit between characters that
+// are not letters or digits. The forms:
+//   192.0.2.7                       IPv4
+//   00:00:5e:00:53:01, 00-00-5e-00  MAC with separators, whole or partial (two or more pairs)
+//   00005e005301, 0000.5e00.5301    MAC with no separators, and the dotted Cisco form
+//   ESP_A1B2C3, cam-0a1b2c, Plug 00ff12   six hex characters after a separator, with at least one digit
+//   2001:db8::1, fe80::, ::1, 2001:db8:0:0   IPv6 (a "::" next to hex, or four or more groups)
+// Words made only of the letters a to f (Facade, Decade, Deadbeef) are left alone, since the six character rule
+// needs a digit. A six digit number after a separator ("Room 100200") does count. A false hit only costs a
+// generic label.
+const NO_ADDRESS_RE = new RegExp(
+  "(?:^|[^0-9a-z])(?:" +
+  "\\d{1,3}(?:\\.\\d{1,3}){3}" +
+  "|[0-9a-f]{2}(?:[:-][0-9a-f]{2})+" +
+  "|[0-9a-f]{12}" +
+  "|[0-9a-f]{4}(?:\\.[0-9a-f]{4}){2}" +
+  "|[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?" +
+  "|::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*" +
+  "|(?:[0-9a-f]{1,4}:){3,}[0-9a-f]{1,4}" +
+  ")(?:[^0-9a-z]|$)" +
+  "|[ _:.-](?=[0-9a-f]{0,5}\\d)[0-9a-f]{6}(?:[^0-9a-z]|$)",
+  "i"
+);
 
 /** A copy of a map model that is safe to share: only what the drawing needs, with new keys, no addresses,
  * hostnames, makers or entity ids, and without devices waiting to be added or suggested hubs. With hideNames
@@ -1057,7 +1080,6 @@ class NetOrbitCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
 <style>
-<style>
   :host { display:block; }
   ha-card { position:relative; font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); overflow:hidden; background: radial-gradient(ellipse at 50% 48%, #13213a 0%, #0b1220 55%, #070b14 100%); color:#e2e8f0; border:1px solid rgba(148,163,184,.12); }
   .head { display:flex; flex-wrap:wrap; align-items:center; gap:10px 12px; padding:16px 18px 4px; }
@@ -1325,9 +1347,11 @@ class NetOrbitCard extends HTMLElement {
     };
     frame(0);
     this._revealing = true;
+    // A newer run (replay) takes over: an older loop sees another token and leaves without touching anything.
+    const run = (this._revealRun = (this._revealRun || 0) + 1);
     const t0 = performance.now();
     const step = () => {
-      if (!this._revealing) return;
+      if (!this._revealing || this._revealRun !== run) return;
       const t = (performance.now() - t0) / 1000;
       if (t >= NO_REVEAL.end || !this.isConnected) {
         this._revealing = false;
@@ -1376,8 +1400,10 @@ class NetOrbitCard extends HTMLElement {
     });
   }
 
-  // Records the first-scan animation of the share map (names hidden unless asked) to a video blob.
-  _shareVideo(hide, onTick) {
+  // Records the first-scan animation of the share map (names hidden unless asked) to a video blob. `alive` says
+  // whether the share popup is still open: once it is not (or the card has left the page) the recording stops
+  // without a result and the promise rejects with an error marked `cancelled`. Every failure rejects.
+  _shareVideo(hide, onTick, alive) {
     const type = noVideoType();
     if (!type) return Promise.reject(new Error("This browser can't record video"));
     const smodel = shareModel(this._model(), { hideNames: hide });
@@ -1394,33 +1420,73 @@ class NetOrbitCard extends HTMLElement {
       found: (t) => total * noEase(frac(t)),
       phase: (t) => NO_SCAN_PHASE[phases[Math.min(phases.length - 1, Math.floor(frac(t) * phases.length))]],
     };
-    const canvas = document.createElement("canvas");
-    canvas.width = 960;
-    canvas.height = Math.round((960 * NO_SHARE.h) / NO_SHARE.w / 2) * 2; // even, for H.264
-    const ctx = canvas.getContext("2d");
-    netorbitPaintFrame(ctx, D.scene, -PRE, o);
-    const stream = canvas.captureStream(30);
-    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 5000000 });
-    const chunks = [];
-    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     return new Promise((resolve, reject) => {
-      rec.onstop = () => {
-        stream.getTracks().forEach((tr) => tr.stop());
-        resolve(new Blob(chunks, { type: type.split(";")[0] }));
+      let stream = null, rec = null, done = false;
+      const stopTracks = () => { try { if (stream) stream.getTracks().forEach((tr) => tr.stop()); } catch (e) { /* already stopped */ } };
+      const stopRec = () => { try { if (rec && rec.state !== "inactive") rec.stop(); } catch (e) { /* already stopped */ } };
+      const fail = (e) => {
+        if (done) return;
+        done = true;
+        stopTracks();
+        reject(e || new Error("Recording failed"));
       };
-      rec.onerror = (e) => reject(e.error || new Error("Recording failed"));
-      rec.start(250);
-      const t0 = performance.now();
-      const dur = PRE + NO_REVEAL.end + HOLD;
-      const step = () => {
-        const el = (performance.now() - t0) / 1000;
-        netorbitPaintFrame(ctx, D.scene, Math.min(el, dur) - PRE, o);
-        if (onTick) onTick(el / dur);
-        if (el < dur) requestAnimationFrame(step);
-        else setTimeout(() => rec.stop(), 120);
-      };
-      requestAnimationFrame(step);
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 960;
+        canvas.height = Math.round((960 * NO_SHARE.h) / NO_SHARE.w / 2) * 2; // even, for H.264
+        const ctx = canvas.getContext("2d");
+        netorbitPaintFrame(ctx, D.scene, -PRE, o);
+        stream = canvas.captureStream(30);
+        rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 5000000 });
+        const chunks = [];
+        rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = () => {
+          if (done) return;
+          done = true;
+          stopTracks();
+          resolve(new Blob(chunks, { type: type.split(";")[0] }));
+        };
+        rec.onerror = (e) => { stopRec(); fail(e && e.error); };
+        rec.start(250);
+        const t0 = performance.now();
+        const dur = PRE + NO_REVEAL.end + HOLD;
+        const step = () => {
+          if (done) return;
+          try {
+            if (!this.isConnected || (alive && !alive())) {
+              const c = new Error("Cancelled");
+              c.cancelled = true;
+              stopRec();
+              fail(c);
+              return;
+            }
+            const el = (performance.now() - t0) / 1000;
+            netorbitPaintFrame(ctx, D.scene, Math.min(el, dur) - PRE, o);
+            if (onTick) onTick(el / dur);
+            if (el < dur) requestAnimationFrame(step);
+            else setTimeout(() => { try { rec.stop(); } catch (e) { fail(e); } }, 120);
+          } catch (e) { stopRec(); fail(e); }
+        };
+        requestAnimationFrame(step);
+      } catch (e) { stopRec(); fail(e); }
     });
+  }
+
+  // Hands a finished image or video to the system share sheet when the browser has one for files (phones, mostly),
+  // and downloads it otherwise. Resolves "shared", "cancelled" (the person closed the sheet) or "saved".
+  _deliver(blob, name) {
+    const save = () => { this._download(blob, name); return "saved"; };
+    let file = null;
+    try {
+      const f = new File([blob], name, { type: blob.type });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [f] })) file = f;
+    } catch (e) { file = null; }
+    if (!file) return Promise.resolve(save());
+    return new Promise((res) => res(navigator.share({ files: [file] }))).then(
+      () => "shared",
+      // AbortError: closed the sheet. Anything else (say the click is too old for the sheet to open): download.
+      (e) => (e && e.name === "AbortError" ? "cancelled" : save())
+    );
   }
 
   _download(blob, name) {
@@ -1478,7 +1544,7 @@ class NetOrbitCard extends HTMLElement {
       status(b.dataset.m === "video" ? "Records the scan animation, about 7 seconds." : "");
     }));
     q(".dl").addEventListener("click", () => {
-      this._sharePng(hide).then((b) => this._download(b, "netorbit-map.png"), (e) => status(String(e.message || e)));
+      this._sharePng(hide).then((b) => this._deliver(b, "netorbit-map.png")).then(() => {}, (e) => status(String(e.message || e)));
     });
     if (q(".cp")) q(".cp").addEventListener("click", () => {
       // Safari wants the clipboard write to start inside the click, with the image still on its way.
@@ -1489,13 +1555,11 @@ class NetOrbitCard extends HTMLElement {
       if (busy) return;
       busy = true;
       q(".rec").disabled = true;
-      this._shareVideo(hide, (f) => status(`Recording... ${Math.min(100, Math.round(f * 100))}%`)).then((b) => {
-        busy = false;
-        q(".rec").disabled = false;
-        status("Saved.");
-        this._lastVideo = b;
-        this._download(b, "netorbit-scan." + (/mp4/.test(b.type) ? "mp4" : "webm"));
-      }, (e) => { busy = false; q(".rec").disabled = false; status("Couldn't record: " + (e.message || e)); });
+      const reset = () => { busy = false; q(".rec").disabled = false; };
+      new Promise((res) => res(this._shareVideo(hide, (f) => status(`Recording... ${Math.min(100, Math.round(f * 100))}%`), () => pop.isConnected)))
+        .then((b) => this._deliver(b, "netorbit-scan." + (/mp4/.test(b.type) ? "mp4" : "webm")))
+        .then((r) => { reset(); status(r === "shared" ? "Shared." : r === "saved" ? "Saved." : ""); },
+          (e) => { reset(); status(e && e.cancelled ? "" : "Couldn't record: " + ((e && e.message) || e)); });
     });
     q(".replay").addEventListener("click", () => this.replayScan());
   }

@@ -162,7 +162,9 @@ const card = require("../custom_components/netorbit/frontend/netorbit-card.js");
 test("scan mode comes from the summary sensor's attributes", () => {
   const { netorbitScanMode } = card;
   assert.strictEqual(netorbitScanMode({ scanning: true, first_scan_done: false, scan_phase: "ping" }), "takeover");
-  assert.strictEqual(netorbitScanMode({ scanning: false, first_scan_done: false }), "takeover"); // between setup and the sweep
+  // A first sweep that is not running (it failed, or has not started) never hides the map.
+  assert.strictEqual(netorbitScanMode({ scanning: false, first_scan_done: false }), "none");
+  assert.strictEqual(netorbitScanMode({ first_scan_done: false }), "none");
   assert.strictEqual(netorbitScanMode({ scanning: true, first_scan_done: true }), "chip");
   assert.strictEqual(netorbitScanMode({ scanning: false, first_scan_done: true }), "none");
   // Older versions of the integration have none of these: draw the map as before.
@@ -282,4 +284,30 @@ test("links draw in from their start", () => {
   assert.strictEqual(noPartialPath("M0,0 L10,20", 0.5), "M0.0,0.0 L5.0,10.0");
   assert.strictEqual(noPartialPath("M0,0 Q10,0 10,10", 1), "M0,0 Q10,0 10,10");
   assert.strictEqual(noPartialPath("M0,0 Q10,0 10,10", 0.5), "M0.0,0.0 Q5.0,0.0 7.5,2.5");
+});
+
+// Names shown, one device called `name`: what does the share model make of it?
+function sharedLabel(name) {
+  const m = richModel();
+  m.devices = [Object.assign({}, m.devices[0], { label: name })];
+  return card.shareModel(m, { hideNames: false }).devices[0].label;
+}
+
+test("with names shown, a name holding any form of address is replaced", () => {
+  const leaky = [
+    "192.0.2.7", "Cam 192.0.2.7", "Cam_192.0.2.7", "cam-192.0.2.7-lan", // IPv4, also next to an underscore
+    "00:00:5e:00:53:01", "00-00-5E-00-53-01", "Device 53:01", // MAC with separators, whole or partial
+    "00005e005301", "Cam 00005E005301", "Cam_00005e005301", // 12 hex characters
+    "0000.5e00.5301", "Cam_0000.5e00.5301", // dotted Cisco form
+    "ESP_A1B2C3", "esp32-a1b2c3", "Plug 00ff12", "Shelly.5e0053", // last six characters of a MAC after a separator
+    "2001:db8::1", "Cam_2001:db8::7", "fe80::", "::1", "2001:db8:0:0:0:0:0:1", // IPv6
+  ];
+  for (const n of leaky) assert.notStrictEqual(sharedLabel(n), n, n + " should be replaced");
+});
+
+test("with names shown, ordinary names stay", () => {
+  // Names made of the letters a to f only (Deadbeef, Facade) are words, not addresses: six hex characters need a digit.
+  // A name needs more than a short number or a version to be treated as an address.
+  const fine = ["Living Room TV", "Office Switch", "Cafe", "Deadbeef Lamp", "Facade Light", "Decade", "Echo Dot 3", "Pixel 7 Pro", "Room 12", "Hallway 2nd Floor", "TV: Den", "Attic AP2"];
+  for (const n of fine) assert.strictEqual(sharedLabel(n), n, n + " should stay");
 });

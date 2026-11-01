@@ -284,6 +284,16 @@ const assert = require("node:assert");
     await fin.waitForTimeout(4500);
     assert.strictEqual(await c10.locator(".radar").count(), 0, "replay cleaned up");
     console.log("replay ok");
+
+    // Replaying twice, 1.5 s apart: the older run must not cut the newer one short (it would end 2.5 s in).
+    await fin.evaluate(() => document.querySelector("netorbit-card").replayScan());
+    await fin.waitForTimeout(1500);
+    await fin.evaluate(() => document.querySelector("netorbit-card").replayScan());
+    await fin.waitForTimeout(2600);
+    assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "a second replay still plays 2.6 s in");
+    await fin.waitForTimeout(2000);
+    assert.strictEqual(await c10.locator(".radar").count(), 0, "second replay cleaned up");
+    console.log("double replay ok");
     await fin.close();
   }
 
@@ -299,6 +309,7 @@ const assert = require("node:assert");
     const c11 = sh.locator("netorbit-card");
     await c11.locator(".sharebtn").click();
     assert.ok(await c11.locator(".sharepop").isVisible(), "Share opens");
+    assert.strictEqual(await c11.evaluate((e) => getComputedStyle(e).display), "block", "the card is a block element");
     assert.strictEqual(await c11.locator(".sharepop .tg").getAttribute("aria-checked"), "true", "names hidden by default");
     const shared = () => c11.locator(".sharepop .thumb").evaluate((img) => decodeURIComponent(img.src.split(",").slice(1).join(",")));
     const names = await sh.evaluate(() => Object.values(window.NETORBIT_SCENARIOS.full).map((s) => s.attributes.label).filter((l) => l && !/^(Router|Internet)$/.test(l)));
@@ -322,9 +333,67 @@ const assert = require("node:assert");
     assert.ok(svg.includes(">Core Switch<") && svg.includes(">Bedroom TV<"), "names come back with the toggle off");
     assert.ok(!svg.includes("192.0.2.") && !/\b[0-9a-f]{2}([:-][0-9a-f]{2})+\b/i.test(svg), "still no addresses with names shown");
     await c11.locator(".sharepop .tg").click();
+    // The system share sheet gets the PNG when there is one; closing it does nothing; a refusal falls back to a download.
+    await sh.evaluate(() => {
+      const card = document.querySelector("netorbit-card");
+      window.__dl = 0;
+      window.__shared = [];
+      window.__shareErr = null;
+      card._download = () => { window.__dl++; };
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: (d) => !!(d && d.files && d.files.length) });
+      Object.defineProperty(navigator, "share", { configurable: true, value: (d) => {
+        window.__shared.push(d.files[0].name + ":" + d.files[0].type);
+        return window.__shareErr ? Promise.reject(Object.assign(new Error("no"), { name: window.__shareErr })) : Promise.resolve();
+      } });
+    });
+    await c11.locator(".sharepop .dl").click();
+    await sh.waitForFunction(() => window.__shared.length === 1);
+    assert.deepStrictEqual(await sh.evaluate(() => window.__shared), ["netorbit-map.png:image/png"]);
+    await sh.waitForTimeout(300);
+    assert.strictEqual(await sh.evaluate(() => window.__dl), 0, "no download when the share sheet took it");
+    await sh.evaluate(() => (window.__shareErr = "AbortError"));
+    await c11.locator(".sharepop .dl").click();
+    await sh.waitForFunction(() => window.__shared.length === 2);
+    await sh.waitForTimeout(300);
+    assert.strictEqual(await sh.evaluate(() => window.__dl), 0, "closing the share sheet does not download");
+    await sh.evaluate(() => (window.__shareErr = "NotAllowedError"));
+    await c11.locator(".sharepop .dl").click();
+    await sh.waitForFunction(() => window.__dl === 1);
+    console.log("share sheet ok");
+    await sh.evaluate(() => { delete navigator.canShare; delete navigator.share; });
+
     // Chromium can record a canvas: the Animation option is there and gives a video.
     assert.ok(await c11.locator('.sharepop .seg button[data-m="video"]').isVisible(), "animation option offered");
     await c11.locator('.sharepop .seg button[data-m="video"]').click();
+    const status = () => c11.locator(".sharepop .status").textContent();
+    const allEnded = () => sh.evaluate(() => window.__streams.length > 0 && window.__streams.every((s) => s.getTracks().every((t) => t.readyState === "ended")));
+    // A recorder that throws on creation: the button comes back, the error shows, the stream is released.
+    await sh.evaluate(() => {
+      window.__streams = [];
+      const cs = HTMLCanvasElement.prototype.captureStream;
+      HTMLCanvasElement.prototype.captureStream = function () { const s = cs.apply(this, arguments); window.__streams.push(s); return s; };
+      window.__MR = window.MediaRecorder;
+      window.MediaRecorder = class { constructor() { throw new Error("boom"); } static isTypeSupported() { return true; } };
+    });
+    await c11.locator(".sharepop .rec").click();
+    await sh.waitForFunction(() => document.querySelector("netorbit-card").shadowRoot.querySelector(".sharepop .status").textContent.includes("boom"));
+    assert.ok((await status()).startsWith("Couldn't record"), await status());
+    assert.ok(await c11.locator(".sharepop .rec").isEnabled(), "Save video is enabled again after a failure");
+    assert.ok(await allEnded(), "tracks stopped after a failure");
+    await sh.evaluate(() => { window.MediaRecorder = window.__MR; window.__streams = []; window.__dl = 0; });
+    // Closing the popup mid-recording cancels it: nothing is downloaded and the stream is released.
+    await c11.locator(".sharepop .rec").click();
+    await sh.waitForTimeout(700);
+    await c11.locator(".sharepop .x").click();
+    await sh.waitForTimeout(1500);
+    assert.strictEqual(await sh.evaluate(() => window.__dl), 0, "a cancelled recording is not downloaded");
+    assert.ok(await allEnded(), "tracks stopped after a cancel");
+    await sh.evaluate(() => { delete document.querySelector("netorbit-card")._download; });
+    await c11.locator(".sharebtn").click();
+    assert.ok(await c11.locator(".sharepop .tg").isVisible(), "Share opens again after a cancel");
+    await c11.locator('.sharepop .seg button[data-m="video"]').click();
+    assert.ok(await c11.locator(".sharepop .rec").isEnabled(), "Save video is ready again");
+    console.log("video failure and cancel ok");
     const [vid] = await Promise.all([sh.waitForEvent("download", { timeout: 30000 }), c11.locator(".sharepop .rec").click()]);
     const size = require("fs").statSync(await vid.path()).size;
     assert.ok(size > 20000, `video has ${size} bytes`);
