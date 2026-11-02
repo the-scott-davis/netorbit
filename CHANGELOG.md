@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A hub given by MAC now matches exactly before a near MAC is considered, so access points bought together are not confused.
+
 ## 0.2.10
 
 ### Fixed
