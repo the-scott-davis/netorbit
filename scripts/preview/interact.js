@@ -285,10 +285,55 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.ok(await c10.locator(".node.dev").count() > 20, "devices on the map");
     console.log("reveal ok");
 
+    // The beam turns around the router. Where its line starts on screen (through the line's screen matrix, which
+    // includes any CSS transform-origin acting on the transform attribute) must stay on the router's centre, and
+    // the far end must stay one beam length away from it, at several moments of the reveal. In WebKit a leftover
+    // transform-origin sent the beam round the whole card.
+    const beamProbe = (ms) => fin.evaluate((ms) => new Promise((resolve) => {
+      const root = document.querySelector("netorbit-card").shadowRoot;
+      const out = [];
+      // Where every node sits when the map is complete. The scale a node pops in with must keep it centred there.
+      const rest = new Map();
+      root.querySelectorAll(".node[data-key] circle.disc").forEach((d) => { const r = d.getBoundingClientRect(); rest.set(d, [r.x + r.width / 2, r.y + r.height / 2]); });
+      const t0 = performance.now();
+      const tick = () => {
+        const line = root.querySelector(".radar.js .beam line");
+        const disc = root.querySelector(".node[data-key=\"hub:gateway\"] circle.disc");
+        if (line && disc) {
+          const m = line.getScreenCTM();
+          const at = (x, y) => { const p = new DOMPoint(x, y).matrixTransform(m); return [p.x, p.y]; };
+          const a = at(line.x1.baseVal.value, line.y1.baseVal.value), b = at(line.x2.baseVal.value, line.y2.baseVal.value);
+          const r = disc.getBoundingClientRect();
+          out.push({ t: (performance.now() - t0) / 1000, a, b, c: [r.x + r.width / 2, r.y + r.height / 2],
+            len: Math.hypot(b[0] - a[0], b[1] - a[1]),
+            drift: Math.max(0, ...[...rest].filter(([d]) => d.parentNode.getAttribute("transform") && getComputedStyle(d.parentNode).opacity > 0.3 && d.getBoundingClientRect().width > 4)
+              .map(([d, c]) => { const q = d.getBoundingClientRect(); return Math.hypot(q.x + q.width / 2 - c[0], q.y + q.height / 2 - c[1]); })),
+            card: root.querySelector("ha-card").getBoundingClientRect().toJSON() });
+        }
+        if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out);
+      };
+      tick();
+    }), ms);
+    const checkBeam = (s, what) => {
+      assert.ok(s.length >= 5, `${what}: ${s.length} beam samples`);
+      s.forEach((p) => {
+        const d0 = Math.hypot(p.a[0] - p.c[0], p.a[1] - p.c[1]);
+        assert.ok(d0 < 4, `${what}: beam starts ${d0.toFixed(1)}px from the router at ${p.t.toFixed(2)}s`);
+        assert.ok(p.drift < 3, `${what}: a popping-in node drifted ${p.drift.toFixed(1)}px off its place at ${p.t.toFixed(2)}s`);
+        assert.ok(Math.abs(p.len - s[0].len) < 2, `${what}: beam length stays ${s[0].len.toFixed(1)}px, was ${p.len.toFixed(1)}px at ${p.t.toFixed(2)}s`);
+        assert.ok(p.b[0] > p.card.x - 400 && p.b[0] < p.card.x + p.card.width + 400 && p.b[1] > p.card.y - 400 && p.b[1] < p.card.y + p.card.height + 400, `${what}: beam stays on the card`);
+      });
+      const angles = s.map((p) => Math.atan2(p.b[1] - p.a[1], p.b[0] - p.a[0]));
+      assert.ok(Math.max(...angles) - Math.min(...angles) > 1.5, `${what}: the beam turned through ${(Math.max(...angles) - Math.min(...angles)).toFixed(2)} rad`);
+    };
+
     // Replay it from the Share popup.
     await c10.locator(".sharebtn").click();
+    const beamRun = beamProbe(1700);
     await c10.locator(".sharepop .replay").click();
     assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "replay plays the reveal");
+    checkBeam(await beamRun, "replay");
+    console.log("beam turns around the router ok");
     await fin.waitForTimeout(4500);
     assert.strictEqual(await c10.locator(".radar").count(), 0, "replay cleaned up");
     console.log("replay ok");
@@ -406,7 +451,32 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       await c11.locator('.sharepop .seg button[data-m="video"]').click();
       assert.ok(await c11.locator(".sharepop .rec").isEnabled(), "Save video is ready again");
       console.log("video failure and cancel ok");
+      // Time the recorder paints must advance by exactly 1/30 s per frame, even when the page stalls: log every
+      // paint, count the frames pushed to the stream, and block the main thread for 600 ms once, a second in.
+      await sh.evaluate(() => {
+        window.__paints = [];
+        window.__pushed = 0;
+        window.__canvasSeen = 0;
+        const paint = window.netorbitPaintFrame;
+        let stalled = false;
+        window.netorbitPaintFrame = function (ctx, scene, t) {
+          window.__paints.push(t);
+          if (ctx.canvas.isConnected) window.__canvasSeen++;
+          if (!stalled && window.__paints.length > 45) { stalled = true; const e = performance.now() + 600; while (performance.now() < e) { /* stall */ } }
+          return paint.apply(this, arguments);
+        };
+        const rf = CanvasCaptureMediaStreamTrack.prototype.requestFrame;
+        CanvasCaptureMediaStreamTrack.prototype.requestFrame = function () { window.__pushed++; return rf.apply(this, arguments); };
+      });
       const [vid] = await Promise.all([sh.waitForEvent("download", { timeout: 30000 }), c11.locator(".sharepop .rec").click()]);
+      const paints = (await sh.evaluate(() => window.__paints)).slice(1); // the first paint is the one made before recording
+      assert.ok(paints.length > 200, `${paints.length} frames painted`);
+      const held = paints.filter((t) => t === paints[0]).length;
+      assert.ok(held >= 14, `the opening is held for ${held} frames`);
+      for (let i = held; i < paints.length; i++) assert.ok(Math.abs(paints[i] - paints[i - 1] - 1 / 30) < 1e-6, `video time jumped by ${(paints[i] - paints[i - 1]).toFixed(3)} s at frame ${i}`);
+      assert.strictEqual(await sh.evaluate(() => window.__pushed), paints.length, "one frame pushed to the stream per painted frame");
+      assert.ok(await sh.evaluate(() => window.__canvasSeen) >= paints.length, "the canvas stays attached to the page while recording");
+      assert.strictEqual(await sh.evaluate(() => document.querySelectorAll("body > canvas").length), 0, "the recording canvas is removed afterwards");
       const size = require("fs").statSync(await vid.path()).size;
       assert.ok(size > 20000, `video has ${size} bytes`);
       assert.ok(/^netorbit-scan\.(mp4|webm)$/.test(vid.suggestedFilename()), vid.suggestedFilename());

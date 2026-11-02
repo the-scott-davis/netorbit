@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.10
+
+### Fixed
+- The radar beam no longer swings around the whole card during the map reveal and "Replay scan animation". It now turns around the router, as on the live scan. The reveal moves the beam with a transform attribute, and a leftover CSS transform origin shifted the turn to the wrong point.
+- The shared scan video (Share, Animation, Save video) no longer freezes after a second and then jumps ahead. The animation is now stepped one frame at a time at 30 frames per second, so a stall can pause the video but never skip ahead. Frames are handed to the recorder one by one, the first frame is held for half a second while the encoder starts, and the status line updates a few times a second instead of every frame. The video is about half a second longer.
+
 ## 0.2.9
 
 ### Added
