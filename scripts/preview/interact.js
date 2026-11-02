@@ -472,13 +472,35 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       const paints = (await sh.evaluate(() => window.__paints)).slice(1); // the first paint is the one made before recording
       assert.ok(paints.length > 200, `${paints.length} frames painted`);
       const held = paints.filter((t) => t === paints[0]).length;
-      assert.ok(held >= 14, `the opening is held for ${held} frames`);
+      assert.ok(held >= 8 && held <= 12, `the opening is held for ${held} frames`);
       for (let i = held; i < paints.length; i++) assert.ok(Math.abs(paints[i] - paints[i - 1] - 1 / 30) < 1e-6, `video time jumped by ${(paints[i] - paints[i - 1]).toFixed(3)} s at frame ${i}`);
-      assert.strictEqual(await sh.evaluate(() => window.__pushed), paints.length, "one frame pushed to the stream per painted frame");
+      assert.strictEqual(await sh.evaluate(() => window.__pushed), paints.length + 1, "one frame pushed per painted frame, plus the opening frame pushed at start");
       assert.ok(await sh.evaluate(() => window.__canvasSeen) >= paints.length, "the canvas stays attached to the page while recording");
       assert.strictEqual(await sh.evaluate(() => document.querySelectorAll("body > canvas").length), 0, "the recording canvas is removed afterwards");
       const size = require("fs").statSync(await vid.path()).size;
       assert.ok(size > 20000, `video has ${size} bytes`);
+      // The clip is as long as the frames painted (30 per second): no 2 s wait at the start, no long hold at the end.
+      const expected = paints.length / 30;
+      assert.ok(Math.abs(expected - 7.17) < 0.1, `expected length ${expected.toFixed(2)} s`);
+      const b64 = require("fs").readFileSync(await vid.path()).toString("base64");
+      const dur = await sh.evaluate(async ([data, mime]) => {
+        const bin = atob(data), u8 = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([u8], { type: mime }));
+        const v = document.createElement("video");
+        v.muted = true;
+        v.preload = "metadata";
+        v.src = url;
+        await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error("video did not load")); });
+        if (!isFinite(v.duration)) { // MediaRecorder webm has no duration header: seek far ahead to make the browser find it
+          await new Promise((res) => { v.ondurationchange = () => { if (isFinite(v.duration)) res(); }; v.currentTime = 1e9; });
+        }
+        const d = v.duration;
+        URL.revokeObjectURL(url);
+        return d;
+      }, [b64, vid.suggestedFilename().endsWith(".mp4") ? "video/mp4" : "video/webm"]);
+      console.log(`video duration ${dur.toFixed(2)} s (expected ${expected.toFixed(2)} s)`);
+      assert.ok(Math.abs(dur - expected) <= 0.5, `video is ${dur.toFixed(2)} s, expected ${expected.toFixed(2)} s`);
       assert.ok(/^netorbit-scan\.(mp4|webm)$/.test(vid.suggestedFilename()), vid.suggestedFilename());
       console.log(`share video ok: ${vid.suggestedFilename()} ${size} bytes`);
     }
