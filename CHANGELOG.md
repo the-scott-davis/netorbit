@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A touch on the map no longer swipes the dashboard to another view** while the map is zoomed in or in Edit layout, on dashboards that swipe between views (the swipe-navigation plugin and the like listen further up the page and read a one-finger pan as a swipe). At the whole map a sideways swipe still changes views as before, and the card's header always does.
+
 ## 0.2.10
 
 ### Fixed
