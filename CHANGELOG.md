@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Saved videos start right away and end without a long pause.
+
 ## 0.2.10
 
 ### Fixed
