@@ -2,7 +2,7 @@
  * Draws a live radial map from the NetOrbit integration's sensors.
  * https://github.com/the-scott-davis/netorbit  (MIT)
  */
-const NETORBIT_VERSION = "0.2.9";
+const NETORBIT_VERSION = "0.2.10";
 
 const NO_STATUS = {
   online: { color: "#34d399", label: "Online" },
@@ -425,6 +425,8 @@ const NO_RADAR_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="1
   `<circle cx="12" cy="12" r="5" fill="none" stroke="${NO_BLUE}" stroke-width="1.4" opacity=".4"/><g class="rb"><circle cx="12" cy="12" r="9.5" fill="none"/><path d="M12 12 L12 2.5 A9.5 9.5 0 0 1 20.2 7.2 Z" fill="${NO_BLUE}" opacity=".55"/>` +
   `<line x1="12" y1="12" x2="12" y2="2.5" stroke="#bfdbfe" stroke-width="1.6"/></g><circle cx="12" cy="12" r="1.8" fill="#bfdbfe"/></svg>`;
 
+// The share video: frames per second, and seconds the first frame is held while the encoder warms up.
+const NO_REC = { fps: 30, hold: 0.5 };
 // The reveal after the first scan, in seconds: the beam turns once and each node pops in as it passes, links
 // draw in, then labels fade in and the normal header comes back.
 const NO_REVEAL = { start: 0.12, turn: 2.05, labels: 2.6, header: 3.3, end: 4 };
@@ -837,6 +839,29 @@ function netorbitPaintFrame(ctx, scene, t, o) {
   icon(NO_ORBIT_PATH, W - 187, H - 25, 18, NO_BLUE);
 }
 
+/** Steps a recording one frame at a time. Animation time comes from the frame number only (t = frame / fps), never
+ *  from the clock, and a late timer still advances exactly one frame, so a stall can freeze the video for a moment
+ *  but can never make the animation jump. The first `lead` frames repeat t = 0 (the opening is held while the
+ *  encoder warms up). o: { fps, frames, lead, frame(t, i), done(), now(), later(fn, ms), clear(id) }.
+ *  Returns { stop() }. Pure of the DOM; exported for tests. */
+function noFramePump(o) {
+  const last = o.frames - 1;
+  let i = 0, timer = null, stopped = false, t0 = 0;
+  const next = () => {
+    timer = null;
+    if (stopped) return;
+    if (i === 0) t0 = o.now();
+    o.frame(Math.max(0, i - o.lead) / o.fps, i);
+    if (stopped) return;
+    if (i >= last) { stopped = true; o.done(); return; }
+    i++;
+    // Aim at the frame's slot on the clock; when behind, go at once, but still one frame per tick.
+    timer = o.later(next, Math.max(0, t0 + (i * 1000) / o.fps - o.now()));
+  };
+  timer = o.later(next, 0);
+  return { stop() { stopped = true; if (timer !== null) o.clear(timer); timer = null; } };
+}
+
 /** The best video type this browser can record a canvas to: mp4 where it can (Safari, newer Chrome), else webm. */
 function noVideoType() {
   try {
@@ -1180,7 +1205,10 @@ class NetOrbitCard extends HTMLElement {
   .radar .pr.p3 { animation-delay:-2s; }
   @keyframes ringpulse { 0% { transform:scale(.1); opacity:.4; } 100% { transform:scale(1); opacity:0; } }
   .radar .beam { animation: spin 3s linear infinite; transform-box:fill-box; transform-origin:center; }
-  .radar.js .beam, .radar.js .pr { animation:none; }
+  /* The reveal moves these with transform attributes set by script. Since SVG2, transform-origin and transform-box
+     also act on a transform attribute, which put the turn about the wrong point (the beam swung round the whole
+     card). In script mode they go back to the SVG defaults, so the attribute means what it says. */
+  .radar.js .beam, .radar.js .pr { animation:none; transform-box:view-box; transform-origin:0 0; }
   .sharepop { position:absolute; top:58px; right:14px; width:320px; max-width:calc(100% - 28px); max-height:calc(100% - 70px); overflow:auto; box-sizing:border-box; background:rgba(15,23,42,.98); border:1px solid rgba(96,165,250,.45); border-radius:14px; padding:14px; color:#e2e8f0; font-size:13px; box-shadow:0 14px 40px rgba(0,0,0,.6); z-index:5; }
   .sharepop .shead { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
   .sharepop .shead b { font-size:15px; }
@@ -1426,37 +1454,55 @@ class NetOrbitCard extends HTMLElement {
       phase: (t) => NO_SCAN_PHASE[phases[Math.min(phases.length - 1, Math.floor(frac(t) * phases.length))]],
     };
     return new Promise((resolve, reject) => {
-      let stream = null, rec = null, done = false;
+      let stream = null, rec = null, done = false, pump = null, canvas = null, starter = null;
       const stopTracks = () => { try { if (stream) stream.getTracks().forEach((tr) => tr.stop()); } catch (e) { /* already stopped */ } };
       const stopRec = () => { try { if (rec && rec.state !== "inactive") rec.stop(); } catch (e) { /* already stopped */ } };
+      const cleanup = () => {
+        if (pump) pump.stop();
+        if (starter) clearTimeout(starter);
+        stopTracks();
+        if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+      };
       const fail = (e) => {
         if (done) return;
         done = true;
-        stopTracks();
+        cleanup();
         reject(e || new Error("Recording failed"));
       };
       try {
-        const canvas = document.createElement("canvas");
+        canvas = document.createElement("canvas");
         canvas.width = 960;
         canvas.height = Math.round((960 * NO_SHARE.h) / NO_SHARE.w / 2) * 2; // even, for H.264
+        // Attached but invisible: a canvas that is not in the page can be throttled and stop feeding the stream.
+        canvas.setAttribute("aria-hidden", "true");
+        canvas.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+        document.body.appendChild(canvas);
         const ctx = canvas.getContext("2d");
         netorbitPaintFrame(ctx, D.scene, -PRE, o);
-        stream = canvas.captureStream(30);
+        // Frames are pushed by hand (one per painted frame) where the browser can, so a frame is never dropped or
+        // doubled by the stream's own clock; otherwise the stream samples the canvas 30 times a second.
+        let track = null;
+        stream = canvas.captureStream(0);
+        track = stream.getVideoTracks && stream.getVideoTracks()[0];
+        if (!track || typeof track.requestFrame !== "function") {
+          stopTracks();
+          track = null;
+          stream = canvas.captureStream(NO_REC.fps);
+        }
         rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 5000000 });
         const chunks = [];
         rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
         rec.onstop = () => {
           if (done) return;
           done = true;
-          stopTracks();
+          cleanup();
           resolve(new Blob(chunks, { type: type.split(";")[0] }));
         };
         rec.onerror = (e) => { stopRec(); fail(e && e.error); };
-        rec.start(250);
-        const t0 = performance.now();
-        const dur = PRE + NO_REVEAL.end + HOLD;
-        const step = () => {
-          if (done) return;
+        const lead = Math.round(NO_REC.hold * NO_REC.fps);
+        const frames = lead + Math.ceil((PRE + NO_REVEAL.end + HOLD) * NO_REC.fps) + 1;
+        let lastTick = 0;
+        const frame = (t, i) => {
           try {
             if (!this.isConnected || (alive && !alive())) {
               const c = new Error("Cancelled");
@@ -1465,14 +1511,26 @@ class NetOrbitCard extends HTMLElement {
               fail(c);
               return;
             }
-            const el = (performance.now() - t0) / 1000;
-            netorbitPaintFrame(ctx, D.scene, Math.min(el, dur) - PRE, o);
-            if (onTick) onTick(el / dur);
-            if (el < dur) requestAnimationFrame(step);
-            else setTimeout(() => { try { rec.stop(); } catch (e) { fail(e); } }, 120);
+            netorbitPaintFrame(ctx, D.scene, t - PRE, o);
+            if (track) track.requestFrame();
+            // The status line is only worth a few updates a second; more just costs the main thread frames.
+            const now = performance.now();
+            if (onTick && (now - lastTick >= 250 || i === frames - 1)) { lastTick = now; onTick(i / (frames - 1)); }
           } catch (e) { stopRec(); fail(e); }
         };
-        requestAnimationFrame(step);
+        const begin = () => {
+          if (pump || done) return;
+          if (starter) clearTimeout(starter);
+          // Hold the first frame while the encoder warms up, so it does not eat the opening.
+          pump = noFramePump({
+            fps: NO_REC.fps, frames, lead, frame,
+            done: () => setTimeout(() => { try { rec.stop(); } catch (e) { fail(e); } }, 120),
+            now: () => performance.now(), later: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id),
+          });
+        };
+        rec.onstart = begin;
+        rec.start(250);
+        starter = setTimeout(begin, 2000); // a browser that never says "start"
       } catch (e) { stopRec(); fail(e); }
     });
   }
@@ -1546,7 +1604,7 @@ class NetOrbitCard extends HTMLElement {
       pop.querySelectorAll(".seg button").forEach((x) => x.classList.toggle("on", x === b));
       q(".btns.img").hidden = b.dataset.m !== "image";
       q(".btns.vid").hidden = b.dataset.m !== "video";
-      status(b.dataset.m === "video" ? "Records the scan animation, about 7 seconds." : "");
+      status(b.dataset.m === "video" ? "Records the scan animation, about 8 seconds." : "");
     }));
     q(".dl").addEventListener("click", () => {
       this._sharePng(hide).then((b) => this._deliver(b, "netorbit-map.png")).then(() => {}, (e) => status(String(e.message || e)));
@@ -2100,5 +2158,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");
