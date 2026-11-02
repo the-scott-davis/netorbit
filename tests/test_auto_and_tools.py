@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import voluptuous as vol
 
 from homeassistant.core import HomeAssistant
@@ -19,6 +20,8 @@ AP_MAC = "00:00:5f:00:53:04"  # example-ok: synthetic test value
 TV_MAC = "00:00:5e:00:53:10"
 NAS_MAC = "00:00:5e:00:53:12"
 MAYBE_MAC = "00:00:5f:00:53:20"  # example-ok: synthetic test value
+# What Home Assistant 2026.10 logs when a tool answers with a plain object instead of a ToolResult.
+DEPRECATED_ANSWER = "returns a JSON object from a tool, which is deprecated; return a ToolResult instead"
 
 
 def _network(fake_net, community: str = "public") -> None:
@@ -316,9 +319,26 @@ async def test_llm_tools(hass: HomeAssistant, fake_net, hass_admin_user, caplog)
     assert "Before any change" in api.api_prompt
     assert all(t.integration == DOMAIN for t in api.tools)
     if hasattr(llm, "ToolAnnotations"):
-        assert tools["netorbit_get_map"].annotations.read_only is True and tools["netorbit_get_map"].annotations.destructive is False
-        assert tools["netorbit_remove_hub"].annotations.destructive is True and tools["netorbit_assign_devices"].annotations.read_only is False
-        assert tools["netorbit_scan_now"].annotations.open_world is True and tools["netorbit_add_hub"].annotations.idempotent is False
+        # Every tool's annotations (read_only, destructive, idempotent, open_world), so a wrong flag on a tool added
+        # later is caught here.
+        expected = {
+            "netorbit_get_map": (True, False, True, False),
+            "netorbit_assign_devices": (False, False, True, False),
+            "netorbit_import_client_list": (False, False, True, False),
+            "netorbit_reset_placement": (False, False, True, False),
+            "netorbit_add_hub": (False, False, False, False),
+            "netorbit_update_hub": (False, False, True, False),
+            "netorbit_remove_hub": (False, True, True, False),
+            "netorbit_confirm_hub": (False, False, True, False),
+            "netorbit_dismiss_hub": (False, False, True, False),
+            "netorbit_update_device": (False, False, True, False),
+            "netorbit_ignore_device": (False, True, True, False),
+            "netorbit_scan_now": (False, False, True, True),
+        }
+        assert set(tools) == set(expected)
+        for name, flags in expected.items():
+            a = tools[name].annotations
+            assert (a.read_only, a.destructive, a.idempotent, a.open_world) == flags, name
 
     result = _data(await api.async_call_tool(llm.ToolInput("netorbit_get_map", {})))
     assert {h["name"] for h in result["hubs"]} >= {"Router", "core-switch"}
@@ -335,8 +355,28 @@ async def test_llm_tools(hass: HomeAssistant, fake_net, hass_admin_user, caplog)
     result = _data(await api.async_call_tool(llm.ToolInput("netorbit_update_device", {"device": "nas", "name": "Backup NAS", "allowed_to_sleep": True})))
     assert result["device"] == "Backup NAS"
     # Home Assistant 2026.10 warns about tools that answer with a plain object or carry no integration; neither here.
-    assert "ToolResult" not in caplog.text and "without an integration" not in caplog.text
+    # (test_a_plain_answer_is_what_home_assistant_warns_about shows the first message is the one it would log.)
+    assert DEPRECATED_ANSWER not in caplog.text
+    assert not any(f"provides the LLM tool {t.name} without an integration" in caplog.text for t in api.tools)
     nas = _node_states(hass)["Backup NAS"]
     assert nas.attributes["sleepy"] is True and nas.attributes["link"] == "hub:attic_ap"
     garage = _node_states(hass)["Attic AP"]
     assert garage.attributes["link"] == "hub:core_switch"
+
+
+async def test_a_plain_answer_is_what_home_assistant_warns_about(hass: HomeAssistant, fake_net, hass_admin_user, caplog, monkeypatch) -> None:
+    """The message test_llm_tools asserts is absent is the one Home Assistant logs for a plain answer, so that check means something."""
+    from homeassistant.core import Context
+
+    from custom_components.netorbit import llm_api
+
+    if not hasattr(llm, "ToolResult"):
+        pytest.skip("Home Assistant before 2026.10 takes a plain answer without a word")
+    monkeypatch.setattr(llm_api, "_result", lambda data, error=False: data)  # answer the old way
+    _network(fake_net)
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    ctx = llm.LLMContext(platform="test", context=Context(user_id=hass_admin_user.id), language="en", assistant=None, device_id=None)
+    api = await llm.async_get_api(hass, DOMAIN, ctx)
+    assert "hubs" in _data(await api.async_call_tool(llm.ToolInput("netorbit_get_map", {})))
+    assert DEPRECATED_ANSWER in caplog.text
