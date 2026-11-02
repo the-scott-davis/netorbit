@@ -288,16 +288,20 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     // The beam turns around the router. Where its line starts on screen (through the line's screen matrix, which
     // includes any CSS transform-origin acting on the transform attribute) must stay on the router's centre, and
     // the far end must stay one beam length away from it, at several moments of the reveal. In WebKit a leftover
-    // transform-origin sent the beam round the whole card.
-    const beamProbe = (ms) => fin.evaluate((ms) => new Promise((resolve) => {
+    // transform-origin sent the beam round the whole card. The sampling follows the reveal itself, not a fixed
+    // stretch of wall clock: it runs from the first frame with a beam until the radar is gone (or `cap` ms), so a
+    // slow machine that paints fewer frames, or starts the reveal late, still sees the whole turn.
+    const beamProbe = (cap) => fin.evaluate((cap) => new Promise((resolve) => {
       const root = document.querySelector("netorbit-card").shadowRoot;
       const out = [];
       // Where every node sits when the map is complete. The scale a node pops in with must keep it centred there.
       const rest = new Map();
       root.querySelectorAll(".node[data-key] circle.disc").forEach((d) => { const r = d.getBoundingClientRect(); rest.set(d, [r.x + r.width / 2, r.y + r.height / 2]); });
       const t0 = performance.now();
+      let seen = false, lost = 0; // lost: when the beam was last missing, once it had been there
       const tick = () => {
         const line = root.querySelector(".radar.js .beam line");
+        if (line) { seen = true; lost = 0; } else if (seen && !lost) lost = performance.now();
         const disc = root.querySelector(".node[data-key=\"hub:gateway\"] circle.disc");
         if (line && disc) {
           const m = line.getScreenCTM();
@@ -310,10 +314,10 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
               .map(([d, c]) => { const q = d.getBoundingClientRect(); return Math.hypot(q.x + q.width / 2 - c[0], q.y + q.height / 2 - c[1]); })),
             card: root.querySelector("ha-card").getBoundingClientRect().toJSON() });
         }
-        if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out);
+        if (performance.now() - t0 < cap && !(lost && performance.now() - lost > 300)) requestAnimationFrame(tick); else resolve(out);
       };
       tick();
-    }), ms);
+    }), cap);
     const checkBeam = (s, what) => {
       assert.ok(s.length >= 5, `${what}: ${s.length} beam samples`);
       s.forEach((p) => {
@@ -324,12 +328,13 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
         assert.ok(p.b[0] > p.card.x - 400 && p.b[0] < p.card.x + p.card.width + 400 && p.b[1] > p.card.y - 400 && p.b[1] < p.card.y + p.card.height + 400, `${what}: beam stays on the card`);
       });
       const angles = s.map((p) => Math.atan2(p.b[1] - p.a[1], p.b[0] - p.a[0]));
+      // The beam makes one full turn in the reveal; with a handful of frames it still spans well over 1.5 rad.
       assert.ok(Math.max(...angles) - Math.min(...angles) > 1.5, `${what}: the beam turned through ${(Math.max(...angles) - Math.min(...angles)).toFixed(2)} rad`);
     };
 
     // Replay it from the Share popup.
     await c10.locator(".sharebtn").click();
-    const beamRun = beamProbe(1700);
+    const beamRun = beamProbe(12000);
     await c10.locator(".sharepop .replay").click();
     assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "replay plays the reveal");
     checkBeam(await beamRun, "replay");
@@ -438,9 +443,25 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       assert.ok(await c11.locator(".sharepop .rec").isEnabled(), "Save video is enabled again after a failure");
       assert.ok(await allEnded(), "tracks stopped after a failure");
       await sh.evaluate(() => { window.MediaRecorder = window.__MR; window.__streams = []; window.__dl = 0; });
-      // Closing the popup mid-recording cancels it: nothing is downloaded and the stream is released.
+      // Closing the popup mid-recording cancels it: nothing is downloaded and the stream is released. The recorder
+      // here never delivers its "start" event (desktop Chromium only sends it when recording stops), and the
+      // animation must still begin at once instead of waiting for it.
+      await sh.evaluate(() => {
+        window.__early = 0;
+        window.__MRreal = window.MediaRecorder;
+        window.MediaRecorder = class extends window.__MRreal {
+          set onstart(f) { /* never called */ }
+          get onstart() { return null; }
+          addEventListener(type, ...rest) { if (type !== "start") super.addEventListener(type, ...rest); }
+        };
+        window.MediaRecorder.isTypeSupported = window.__MRreal.isTypeSupported.bind(window.__MRreal);
+        window.__paintReal = window.netorbitPaintFrame;
+        window.netorbitPaintFrame = function () { window.__early++; return window.__paintReal.apply(this, arguments); };
+      });
       await c11.locator(".sharepop .rec").click();
       await sh.waitForTimeout(700);
+      assert.ok(await sh.evaluate(() => window.__early) > 5, `the animation runs without a start event (${await sh.evaluate(() => window.__early)} frames painted after 0.7 s)`);
+      await sh.evaluate(() => { window.MediaRecorder = window.__MRreal; window.netorbitPaintFrame = window.__paintReal; });
       await c11.locator(".sharepop .x").click();
       await sh.waitForTimeout(1500);
       assert.strictEqual(await sh.evaluate(() => window.__dl), 0, "a cancelled recording is not downloaded");
@@ -456,11 +477,13 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       await sh.evaluate(() => {
         window.__paints = [];
         window.__pushed = 0;
+        window.__wall = [];
         window.__canvasSeen = 0;
         const paint = window.netorbitPaintFrame;
         let stalled = false;
         window.netorbitPaintFrame = function (ctx, scene, t) {
           window.__paints.push(t);
+          window.__wall.push(performance.now());
           if (ctx.canvas.isConnected) window.__canvasSeen++;
           if (!stalled && window.__paints.length > 45) { stalled = true; const e = performance.now() + 600; while (performance.now() < e) { /* stall */ } }
           return paint.apply(this, arguments);
@@ -470,6 +493,7 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       });
       const [vid] = await Promise.all([sh.waitForEvent("download", { timeout: 30000 }), c11.locator(".sharepop .rec").click()]);
       const paints = (await sh.evaluate(() => window.__paints)).slice(1); // the first paint is the one made before recording
+      const wall = (await sh.evaluate(() => window.__wall)).slice(1); // when each of them happened, in ms
       assert.ok(paints.length > 200, `${paints.length} frames painted`);
       const held = paints.filter((t) => t === paints[0]).length;
       assert.ok(held >= 8 && held <= 12, `the opening is held for ${held} frames`);
@@ -479,9 +503,14 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       assert.strictEqual(await sh.evaluate(() => document.querySelectorAll("body > canvas").length), 0, "the recording canvas is removed afterwards");
       const size = require("fs").statSync(await vid.path()).size;
       assert.ok(size > 20000, `video has ${size} bytes`);
-      // The clip is as long as the frames painted (30 per second): no 2 s wait at the start, no long hold at the end.
+      // The clip is as long as the animation it recorded: the frames painted (30 per second) is the least it can be,
+      // and the wall clock time the painting took is the most (plus the encoder's closing 120 ms and a frame).
+      // MediaRecorder stamps frames with the clock, not the frame number, so a slow or busy machine stretches the
+      // file past paints / 30 and a fixed tolerance around it is flaky; this window moves with the machine and
+      // still catches a long wait at the start or a long hold at the end.
       const expected = paints.length / 30;
       assert.ok(Math.abs(expected - 7.17) < 0.1, `expected length ${expected.toFixed(2)} s`);
+      const spent = (wall[wall.length - 1] - wall[0]) / 1000;
       const b64 = require("fs").readFileSync(await vid.path()).toString("base64");
       const dur = await sh.evaluate(async ([data, mime]) => {
         const bin = atob(data), u8 = new Uint8Array(bin.length);
@@ -499,8 +528,9 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
         URL.revokeObjectURL(url);
         return d;
       }, [b64, vid.suggestedFilename().endsWith(".mp4") ? "video/mp4" : "video/webm"]);
-      console.log(`video duration ${dur.toFixed(2)} s (expected ${expected.toFixed(2)} s)`);
-      assert.ok(Math.abs(dur - expected) <= 0.5, `video is ${dur.toFixed(2)} s, expected ${expected.toFixed(2)} s`);
+      console.log(`video duration ${dur.toFixed(2)} s (frames ${expected.toFixed(2)} s, painted over ${spent.toFixed(2)} s)`);
+      assert.ok(dur >= expected - 0.3, `video is ${dur.toFixed(2)} s, shorter than its ${expected.toFixed(2)} s of frames`);
+      assert.ok(dur <= spent + 0.75, `video is ${dur.toFixed(2)} s, longer than the ${spent.toFixed(2)} s it took to paint`);
       assert.ok(/^netorbit-scan\.(mp4|webm)$/.test(vid.suggestedFilename()), vid.suggestedFilename());
       console.log(`share video ok: ${vid.suggestedFilename()} ${size} bytes`);
     }
