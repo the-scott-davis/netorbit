@@ -289,16 +289,22 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     // includes any CSS transform-origin acting on the transform attribute) must stay on the router's centre, and
     // the far end must stay one beam length away from it, at several moments of the reveal. In WebKit a leftover
     // transform-origin sent the beam round the whole card.
-    const beamProbe = (ms) => fin.evaluate((ms) => new Promise((resolve) => {
+    // The samples are timed from the first frame that shows the beam, not from the call, so a slow click does not
+    // eat into the window. It samples for at least minMs and goes on until the beam has turned through minTurn
+    // radians, but gives up after maxMs (the beam turns once in about 2 s and the radar is gone after 3.3 s).
+    const beamProbe = (minMs, minTurn, maxMs) => fin.evaluate(([minMs, minTurn, maxMs]) => new Promise((resolve) => {
       const root = document.querySelector("netorbit-card").shadowRoot;
       const out = [];
       // Where every node sits when the map is complete. The scale a node pops in with must keep it centred there.
       const rest = new Map();
       root.querySelectorAll(".node[data-key] circle.disc").forEach((d) => { const r = d.getBoundingClientRect(); rest.set(d, [r.x + r.width / 2, r.y + r.height / 2]); });
-      const t0 = performance.now();
+      const tStart = performance.now();
+      let t0 = null;
+      let lo = Infinity, hi = -Infinity;
       const tick = () => {
         const line = root.querySelector(".radar.js .beam line");
         const disc = root.querySelector(".node[data-key=\"hub:gateway\"] circle.disc");
+        if (line && disc && t0 === null) t0 = performance.now();
         if (line && disc) {
           const m = line.getScreenCTM();
           const at = (x, y) => { const p = new DOMPoint(x, y).matrixTransform(m); return [p.x, p.y]; };
@@ -309,11 +315,16 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
             drift: Math.max(0, ...[...rest].filter(([d]) => d.parentNode.getAttribute("transform") && getComputedStyle(d.parentNode).opacity > 0.3 && d.getBoundingClientRect().width > 4)
               .map(([d, c]) => { const q = d.getBoundingClientRect(); return Math.hypot(q.x + q.width / 2 - c[0], q.y + q.height / 2 - c[1]); })),
             card: root.querySelector("ha-card").getBoundingClientRect().toJSON() });
+          const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+          lo = Math.min(lo, ang); hi = Math.max(hi, ang);
         }
-        if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out);
+        const now = performance.now();
+        const done = t0 === null ? now - tStart > maxMs
+          : (now - t0 >= minMs && (hi - lo > minTurn || now - t0 >= maxMs)) || !line;
+        if (done) resolve(out); else requestAnimationFrame(tick);
       };
       tick();
-    }), ms);
+    }), [minMs, minTurn, maxMs]);
     const checkBeam = (s, what) => {
       assert.ok(s.length >= 5, `${what}: ${s.length} beam samples`);
       s.forEach((p) => {
@@ -329,7 +340,7 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
 
     // Replay it from the Share popup.
     await c10.locator(".sharebtn").click();
-    const beamRun = beamProbe(1700);
+    const beamRun = beamProbe(1700, 1.5, 5000);
     await c10.locator(".sharepop .replay").click();
     assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "replay plays the reveal");
     checkBeam(await beamRun, "replay");
@@ -814,17 +825,28 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const c7 = hp.locator("netorbit-card");
     await c7.locator(".editbtn").click();
     const opts = async () => c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.value).sort());
+    // Click a hub and wait for its popup. A click that opens nothing is repeated, since a slow browser can take
+    // the click before the map has been wired up again after a redraw. The popup is read only once it is there.
+    const openHub = async (key) => {
+      for (let i = 0; i < 5; i++) {
+        await c7.locator(`.node.hub[data-key="hub:${key}"] circle.disc`).click({ force: true });
+        try { await c7.locator(".pop input.name").waitFor({ timeout: 2000 }); return; } catch (e) { console.log(`hub popup for ${key} not there after click ${i + 1}`); }
+      }
+      assert.fail(`the popup of hub ${key} never opened`);
+    };
     // The router has no parent to pick.
-    await c7.locator('.node.hub[data-key="hub:gateway"] circle.disc').click({ force: true });
+    await openHub("gateway");
     assert.strictEqual(await c7.locator(".pop select.parent").count(), 0, "the router has no Connected to picker");
     await c7.locator(".pop .x").click();
     // A hub's own descendants are not offered, and neither is the hub itself.
-    await c7.locator('.node.hub[data-key="hub:core"] circle.disc').click({ force: true });
+    await openHub("core");
     assert.deepStrictEqual(await opts(), ["gateway"], "a switch is offered only hubs that are not below it");
     await c7.locator(".pop .x").click();
     // Office Switch hangs off Core Switch. Move it under Hallway AP.
-    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
-    assert.ok((await c7.locator(".pop label", { hasText: "Connected to" }).count()) === 1, "picker is labelled Connected to");
+    await openHub("office");
+    await c7.locator(".pop label", { hasText: "Connected to" }).waitFor({ timeout: 10000 });
+    assert.strictEqual(await c7.locator(".pop label", { hasText: "Connected to" }).count(), 1, "picker is labelled Connected to");
+    await c7.locator(".pop select.parent").waitFor({ timeout: 10000 });
     assert.strictEqual(await c7.locator(".pop select.parent").inputValue(), "core", "current parent is selected");
     assert.deepStrictEqual(await opts(), ["core", "down", "garage", "gateway", "up"], "every other real hub is offered, no group or New devices hub");
     await c7.locator(".pop select.parent").selectOption("up");
@@ -832,21 +854,21 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const hc = await hp.evaluate(() => window.calls);
     assert.deepStrictEqual(hc.at(-1).slice(1), ["update_hub", { hub: "office", parent: "up", config_entry_id: "preview" }]);
     // Saving without touching Connected to sends no parent.
-    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    await openHub("office");
     await c7.locator(".pop input.name").fill("Desk Switch");
     await c7.locator(".pop .save").click();
     const hc2 = await hp.evaluate(() => window.calls);
     assert.deepStrictEqual(hc2.at(-1).slice(1), ["update_hub", { hub: "office", name: "Desk Switch", config_entry_id: "preview" }]);
     // Two hubs with the same name are told apart by their address.
     await hp.evaluate(() => { const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === "hub:down"); st.attributes.label = "Hallway AP"; window.pushHass(); });
-    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    await openHub("office");
     const names = await c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.textContent));
     assert.strictEqual(names.filter((t) => t.startsWith("Hallway AP (192.0.2.")).length, 2, "same-name hubs show their address: " + names.join("|"));
     assert.ok(names.includes("Core Switch"), "a unique name stays plain");
     await c7.locator(".pop .x").click();
     // A hub whose parent no longer exists shows the router, and saving without a change sends no parent.
     await hp.evaluate(() => { const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === "hub:office"); st.attributes.link = "hub:ghost"; window.pushHass(); });
-    await c7.locator('.node.hub[data-key="hub:office"] circle.disc').click({ force: true });
+    await openHub("office");
     assert.strictEqual(await c7.locator(".pop select.parent").inputValue(), "gateway", "a missing parent falls back to the router");
     await c7.locator(".pop input.name").fill("Desk Switch 2");
     await c7.locator(".pop .save").click();
@@ -854,10 +876,10 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.deepStrictEqual(hc3.at(-1).slice(1), ["update_hub", { hub: "office", name: "Desk Switch 2", config_entry_id: "preview" }]);
     // Bad data with a loop (Core under Office, Office under Core) still opens the picker, and a hub in the loop is not offered itself.
     await hp.evaluate(() => { const find = (k) => Object.values(window.card._hass.states).find((x) => x.attributes.node_key === k); find("hub:office").attributes.link = "hub:core"; find("hub:core").attributes.link = "hub:office"; window.pushHass(); });
-    await c7.locator('.node.hub[data-key="hub:up"] circle.disc').click({ force: true });
+    await openHub("up");
     assert.ok((await opts()).includes("gateway"), "the picker opens on looped data");
     await c7.locator(".pop .x").click();
-    await c7.locator('.node.hub[data-key="hub:core"] circle.disc').click({ force: true });
+    await openHub("core");
     assert.ok(!(await opts()).includes("core") && !(await opts()).includes("office"), "a looped hub is not offered itself or its loop partner");
     await c7.locator(".pop .x").click();
     console.log("hub parent picker ok:", JSON.stringify(hc.at(-1)[2]));
