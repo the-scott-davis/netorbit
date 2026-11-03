@@ -300,7 +300,7 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       root.querySelectorAll(".node[data-key] circle.disc").forEach((d) => { const r = d.getBoundingClientRect(); rest.set(d, [r.x + r.width / 2, r.y + r.height / 2]); });
       const tStart = performance.now();
       let t0 = null;
-      let lo = Infinity, hi = -Infinity;
+      let lo = Infinity, hi = -Infinity, ang = 0, prev = null;
       const tick = () => {
         const line = root.querySelector(".radar.js .beam line");
         const disc = root.querySelector(".node[data-key=\"hub:gateway\"] circle.disc");
@@ -315,7 +315,11 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
             drift: Math.max(0, ...[...rest].filter(([d]) => d.parentNode.getAttribute("transform") && getComputedStyle(d.parentNode).opacity > 0.3 && d.getBoundingClientRect().width > 4)
               .map(([d, c]) => { const q = d.getBoundingClientRect(); return Math.hypot(q.x + q.width / 2 - c[0], q.y + q.height / 2 - c[1]); })),
             card: root.querySelector("ha-card").getBoundingClientRect().toJSON() });
-          const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+          // The angle is unwrapped (no jump at +-pi), so the turn is the real turn and a small turn across the
+          // +-pi line cannot read as a full circle.
+          const raw = Math.atan2(b[1] - a[1], b[0] - a[0]);
+          ang = prev === null ? raw : ang + Math.atan2(Math.sin(raw - prev), Math.cos(raw - prev));
+          prev = raw;
           lo = Math.min(lo, ang); hi = Math.max(hi, ang);
         }
         const now = performance.now();
@@ -334,7 +338,13 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
         assert.ok(Math.abs(p.len - s[0].len) < 2, `${what}: beam length stays ${s[0].len.toFixed(1)}px, was ${p.len.toFixed(1)}px at ${p.t.toFixed(2)}s`);
         assert.ok(p.b[0] > p.card.x - 400 && p.b[0] < p.card.x + p.card.width + 400 && p.b[1] > p.card.y - 400 && p.b[1] < p.card.y + p.card.height + 400, `${what}: beam stays on the card`);
       });
-      const angles = s.map((p) => Math.atan2(p.b[1] - p.a[1], p.b[0] - p.a[0]));
+      let cur = 0, prev = null;
+      const angles = s.map((p) => {
+        const raw = Math.atan2(p.b[1] - p.a[1], p.b[0] - p.a[0]);
+        cur = prev === null ? raw : cur + Math.atan2(Math.sin(raw - prev), Math.cos(raw - prev));
+        prev = raw;
+        return cur;
+      });
       assert.ok(Math.max(...angles) - Math.min(...angles) > 1.5, `${what}: the beam turned through ${(Math.max(...angles) - Math.min(...angles)).toFixed(2)} rad`);
     };
 
@@ -345,7 +355,7 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "replay plays the reveal");
     checkBeam(await beamRun, "replay");
     console.log("beam turns around the router ok");
-    await fin.waitForTimeout(4500);
+    await fin.waitForFunction(() => document.querySelector("netorbit-card").shadowRoot.querySelectorAll(".radar").length === 0, null, { timeout: 10000 });
     assert.strictEqual(await c10.locator(".radar").count(), 0, "replay cleaned up");
     console.log("replay ok");
 
@@ -825,14 +835,29 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const c7 = hp.locator("netorbit-card");
     await c7.locator(".editbtn").click();
     const opts = async () => c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.value).sort());
-    // Click a hub and wait for its popup. A click that opens nothing is repeated, since a slow browser can take
-    // the click before the map has been wired up again after a redraw. The popup is read only once it is there.
+    // Click a hub and wait for its popup. Right after a redraw (closing a popup redraws the map) the hub is still
+    // moving for a few frames, and a click that lands on it mid-move goes to the map behind it and opens nothing.
+    // So the click waits until the hub has held still for 5 frames, is made once, and the popup must follow it.
+    // There is no retry: a tap that opens nothing on a settled map is a failure.
     const openHub = async (key) => {
-      for (let i = 0; i < 5; i++) {
-        await c7.locator(`.node.hub[data-key="hub:${key}"] circle.disc`).click({ force: true });
-        try { await c7.locator(".pop input.name").waitFor({ timeout: 2000 }); return; } catch (e) { console.log(`hub popup for ${key} not there after click ${i + 1}`); }
-      }
-      assert.fail(`the popup of hub ${key} never opened`);
+      const sel = `.node.hub[data-key="hub:${key}"] circle.disc`;
+      await hp.evaluate((sel) => new Promise((resolve, reject) => {
+        const root = document.querySelector("netorbit-card").shadowRoot;
+        const t0 = performance.now();
+        const pos = () => { const d = root.querySelector(sel); if (!d) return null; const b = d.getBoundingClientRect(); return [b.x, b.y, b.width].map((v) => v.toFixed(2)).join(); };
+        let last = null, same = 0;
+        const tick = () => {
+          const now = pos();
+          same = now !== null && now === last ? same + 1 : 0;
+          last = now;
+          if (same >= 5) resolve();
+          else if (performance.now() - t0 > 10000) reject(new Error("the hub never held still: " + sel));
+          else requestAnimationFrame(tick);
+        };
+        tick();
+      }), sel);
+      await c7.locator(sel).click({ force: true });
+      await c7.locator(".pop input.name").waitFor({ timeout: 10000 });
     };
     // The router has no parent to pick.
     await openHub("gateway");
