@@ -8,6 +8,9 @@
 - **Prefer DNS and Bonjour names** (Settings, off by default). The name your network gives a device comes first, before names from other integrations, and replaces names NetOrbit made up for hubs, such as *Router*. Names you typed are kept. Every sensor now also carries the full DNS name as `fqdn`.
 
 ### Fixed
+- A hub given by MAC now matches exactly before a near MAC is considered, so access points bought together are not confused.
+- **A touch on the map no longer swipes the dashboard to another view** while the map is zoomed in or in Edit layout, on dashboards that swipe between views (the swipe-navigation plugin and the like listen further up the page and read a one-finger pan as a swipe). At the whole map a sideways swipe still changes views as before, and the card's header always does.
+- **Assistant tools on Home Assistant 2026.10.** NetOrbit's AI assistant tools now answer in the format Home Assistant 2026.10 expects (thanks @xlntech1, #30). No more deprecation warning on every call, and they keep working after 2027.11, when the old format stops being accepted. Older Home Assistant versions work as before.
 - The first change made in Settings after a restart was ignored when NetOrbit had saved something itself during its first sweep (a hub's MAC address, a DHCP move).
 - Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
 
