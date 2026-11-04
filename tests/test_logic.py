@@ -6,6 +6,7 @@ import pytest
 
 from custom_components.netorbit.logic import (
     compute_status,
+    rollup_status,
     fallback_name,
     guess_icon,
     is_random_mac,
@@ -49,6 +50,18 @@ def test_status():
     # never seen, but only just started tracking: give it the full window
     assert compute_status(False, None, NOW - timedelta(hours=1), NOW, DAY) == "recent"
     assert compute_status(False, None, NOW - timedelta(hours=25), NOW, DAY) == "stale"
+
+
+def test_rollup_status():
+    assert rollup_status([("stale", False), ("online", False)]) == "online"
+    assert rollup_status([("stale", False), ("recent", False)]) == "recent"
+    assert rollup_status([("stale", False), ("stale", False)]) == "stale"
+    # nothing behind it: unknown, not stale
+    assert rollup_status([]) == ""
+    # a sleepy device that's off says nothing; one that's on still counts
+    assert rollup_status([("stale", True)]) == ""
+    assert rollup_status([("stale", True), ("stale", False)]) == "stale"
+    assert rollup_status([("online", True), ("stale", False)]) == "online"
 
 
 @pytest.mark.parametrize(

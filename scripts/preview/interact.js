@@ -285,11 +285,77 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.ok(await c10.locator(".node.dev").count() > 20, "devices on the map");
     console.log("reveal ok");
 
+    // The beam turns around the router. Where its line starts on screen (through the line's screen matrix, which
+    // includes any CSS transform-origin acting on the transform attribute) must stay on the router's centre, and
+    // the far end must stay one beam length away from it, at several moments of the reveal. In WebKit a leftover
+    // transform-origin sent the beam round the whole card.
+    // The samples are timed from the first frame that shows the beam, not from the call, so a slow click does not
+    // eat into the window. It samples for at least minMs and goes on until the beam has turned through minTurn
+    // radians, but gives up after maxMs (the beam turns once in about 2 s and the radar is gone after 3.3 s).
+    const beamProbe = (minMs, minTurn, maxMs) => fin.evaluate(([minMs, minTurn, maxMs]) => new Promise((resolve) => {
+      const root = document.querySelector("netorbit-card").shadowRoot;
+      const out = [];
+      // Where every node sits when the map is complete. The scale a node pops in with must keep it centred there.
+      const rest = new Map();
+      root.querySelectorAll(".node[data-key] circle.disc").forEach((d) => { const r = d.getBoundingClientRect(); rest.set(d, [r.x + r.width / 2, r.y + r.height / 2]); });
+      const tStart = performance.now();
+      let t0 = null;
+      let lo = Infinity, hi = -Infinity, ang = 0, prev = null;
+      const tick = () => {
+        const line = root.querySelector(".radar.js .beam line");
+        const disc = root.querySelector(".node[data-key=\"hub:gateway\"] circle.disc");
+        if (line && disc && t0 === null) t0 = performance.now();
+        if (line && disc) {
+          const m = line.getScreenCTM();
+          const at = (x, y) => { const p = new DOMPoint(x, y).matrixTransform(m); return [p.x, p.y]; };
+          const a = at(line.x1.baseVal.value, line.y1.baseVal.value), b = at(line.x2.baseVal.value, line.y2.baseVal.value);
+          const r = disc.getBoundingClientRect();
+          out.push({ t: (performance.now() - t0) / 1000, a, b, c: [r.x + r.width / 2, r.y + r.height / 2],
+            len: Math.hypot(b[0] - a[0], b[1] - a[1]),
+            drift: Math.max(0, ...[...rest].filter(([d]) => d.parentNode.getAttribute("transform") && getComputedStyle(d.parentNode).opacity > 0.3 && d.getBoundingClientRect().width > 4)
+              .map(([d, c]) => { const q = d.getBoundingClientRect(); return Math.hypot(q.x + q.width / 2 - c[0], q.y + q.height / 2 - c[1]); })),
+            card: root.querySelector("ha-card").getBoundingClientRect().toJSON() });
+          // The angle is unwrapped (no jump at +-pi), so the turn is the real turn and a small turn across the
+          // +-pi line cannot read as a full circle.
+          const raw = Math.atan2(b[1] - a[1], b[0] - a[0]);
+          ang = prev === null ? raw : ang + Math.atan2(Math.sin(raw - prev), Math.cos(raw - prev));
+          prev = raw;
+          lo = Math.min(lo, ang); hi = Math.max(hi, ang);
+        }
+        const now = performance.now();
+        const done = t0 === null ? now - tStart > maxMs
+          : (now - t0 >= minMs && (hi - lo > minTurn || now - t0 >= maxMs)) || !line;
+        if (done) resolve(out); else requestAnimationFrame(tick);
+      };
+      tick();
+    }), [minMs, minTurn, maxMs]);
+    const checkBeam = (s, what) => {
+      assert.ok(s.length >= 5, `${what}: ${s.length} beam samples`);
+      s.forEach((p) => {
+        const d0 = Math.hypot(p.a[0] - p.c[0], p.a[1] - p.c[1]);
+        assert.ok(d0 < 4, `${what}: beam starts ${d0.toFixed(1)}px from the router at ${p.t.toFixed(2)}s`);
+        assert.ok(p.drift < 3, `${what}: a popping-in node drifted ${p.drift.toFixed(1)}px off its place at ${p.t.toFixed(2)}s`);
+        assert.ok(Math.abs(p.len - s[0].len) < 2, `${what}: beam length stays ${s[0].len.toFixed(1)}px, was ${p.len.toFixed(1)}px at ${p.t.toFixed(2)}s`);
+        assert.ok(p.b[0] > p.card.x - 400 && p.b[0] < p.card.x + p.card.width + 400 && p.b[1] > p.card.y - 400 && p.b[1] < p.card.y + p.card.height + 400, `${what}: beam stays on the card`);
+      });
+      let cur = 0, prev = null;
+      const angles = s.map((p) => {
+        const raw = Math.atan2(p.b[1] - p.a[1], p.b[0] - p.a[0]);
+        cur = prev === null ? raw : cur + Math.atan2(Math.sin(raw - prev), Math.cos(raw - prev));
+        prev = raw;
+        return cur;
+      });
+      assert.ok(Math.max(...angles) - Math.min(...angles) > 1.5, `${what}: the beam turned through ${(Math.max(...angles) - Math.min(...angles)).toFixed(2)} rad`);
+    };
+
     // Replay it from the Share popup.
     await c10.locator(".sharebtn").click();
+    const beamRun = beamProbe(1700, 1.5, 5000);
     await c10.locator(".sharepop .replay").click();
     assert.ok(await c10.locator("ha-card.revealing .radar.js").count(), "replay plays the reveal");
-    await fin.waitForTimeout(4500);
+    checkBeam(await beamRun, "replay");
+    console.log("beam turns around the router ok");
+    await fin.waitForFunction(() => document.querySelector("netorbit-card").shadowRoot.querySelectorAll(".radar").length === 0, null, { timeout: 10000 });
     assert.strictEqual(await c10.locator(".radar").count(), 0, "replay cleaned up");
     console.log("replay ok");
 
@@ -406,7 +472,32 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       await c11.locator('.sharepop .seg button[data-m="video"]').click();
       assert.ok(await c11.locator(".sharepop .rec").isEnabled(), "Save video is ready again");
       console.log("video failure and cancel ok");
+      // Time the recorder paints must advance by exactly 1/30 s per frame, even when the page stalls: log every
+      // paint, count the frames pushed to the stream, and block the main thread for 600 ms once, a second in.
+      await sh.evaluate(() => {
+        window.__paints = [];
+        window.__pushed = 0;
+        window.__canvasSeen = 0;
+        const paint = window.netorbitPaintFrame;
+        let stalled = false;
+        window.netorbitPaintFrame = function (ctx, scene, t) {
+          window.__paints.push(t);
+          if (ctx.canvas.isConnected) window.__canvasSeen++;
+          if (!stalled && window.__paints.length > 45) { stalled = true; const e = performance.now() + 600; while (performance.now() < e) { /* stall */ } }
+          return paint.apply(this, arguments);
+        };
+        const rf = CanvasCaptureMediaStreamTrack.prototype.requestFrame;
+        CanvasCaptureMediaStreamTrack.prototype.requestFrame = function () { window.__pushed++; return rf.apply(this, arguments); };
+      });
       const [vid] = await Promise.all([sh.waitForEvent("download", { timeout: 30000 }), c11.locator(".sharepop .rec").click()]);
+      const paints = (await sh.evaluate(() => window.__paints)).slice(1); // the first paint is the one made before recording
+      assert.ok(paints.length > 200, `${paints.length} frames painted`);
+      const held = paints.filter((t) => t === paints[0]).length;
+      assert.ok(held >= 14, `the opening is held for ${held} frames`);
+      for (let i = held; i < paints.length; i++) assert.ok(Math.abs(paints[i] - paints[i - 1] - 1 / 30) < 1e-6, `video time jumped by ${(paints[i] - paints[i - 1]).toFixed(3)} s at frame ${i}`);
+      assert.strictEqual(await sh.evaluate(() => window.__pushed), paints.length, "one frame pushed to the stream per painted frame");
+      assert.ok(await sh.evaluate(() => window.__canvasSeen) >= paints.length, "the canvas stays attached to the page while recording");
+      assert.strictEqual(await sh.evaluate(() => document.querySelectorAll("body > canvas").length), 0, "the recording canvas is removed afterwards");
       const size = require("fs").statSync(await vid.path()).size;
       assert.ok(size > 20000, `video has ${size} bytes`);
       assert.ok(/^netorbit-scan\.(mp4|webm)$/.test(vid.suggestedFilename()), vid.suggestedFilename());
@@ -641,6 +732,10 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const box = await mapBox(p);
     const bg = await backgroundPoint(p);
     assert.ok(bg, "found a spot on the map background");
+    // Touches that reach the page are counted at the document, where dashboards that swipe between views listen.
+    await p.evaluate(() => { window.pageTouches = 0; ["touchstart", "touchmove"].forEach((t) => document.addEventListener(t, () => window.pageTouches++)); });
+    const pageTouches = () => p.evaluate(() => window.pageTouches);
+    const resetPageTouches = () => p.evaluate(() => { window.pageTouches = 0; });
 
     // A tap on a device (the page has not scrolled yet).
     const tvKey = await keyOfIn(p, "Bedroom TV");
@@ -664,8 +759,19 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     }, null, { polling: "raf" });
     assert.ok((await p.evaluate(() => window.scrollY)) > 60, "a one-finger swipe over the whole map scrolls the page");
     assert.strictEqual(await viewBox(p), whole, "and leaves the map alone");
+    assert.ok((await pageTouches()) > 0, "at the whole map, touches on the map reach the page");
     await p.evaluate(() => window.scrollTo(0, 0));
     await wait(100);
+
+    // At the whole map a sideways swipe over the map reaches the page too (a dashboard may change views on it) and
+    // moves nothing here: there is nothing to pan.
+    await resetPageTouches();
+    await touch("touchStart", [bg]);
+    for (let i = 1; i <= 8; i++) { await touch("touchMove", [{ x: bg.x - i * 12, y: bg.y }]); await wait(16); }
+    await touch("touchEnd", []);
+    await wait(200);
+    assert.ok((await pageTouches()) > 0, "at the whole map, a sideways swipe over the map reaches the page");
+    assert.strictEqual(await viewBox(p), whole, "and leaves the map alone");
 
     // A pinch over the map zooms it.
     const b2 = await mapBox(p);
@@ -708,11 +814,20 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
       return null;
     });
     assert.ok(onDevice, "found a device circle inside the zoomed map");
+    await resetPageTouches();
     await pan(onDevice, "from a device");
     const bg2 = await backgroundPoint(p);
     assert.ok(bg2, "found a background spot in the zoomed map");
     await pan({ x: Math.max(bg2.x, (await mapBox(p)).x + 140), y: bg2.y }, "from the background");
-    console.log("phone touch ok: swipe scrolls, tap opens details, pinch zooms, drag pans");
+    // Zoomed in, those touches stopped at the map: a dashboard that swipes between views never saw them. A swipe over
+    // the card's header still reaches the page.
+    assert.strictEqual(await pageTouches(), 0, "zoomed in, touches on the map stop at the map");
+    const head = await centerIn(p, ".head");
+    await touch("touchStart", [head]);
+    for (let i = 1; i <= 8; i++) { await touch("touchMove", [{ x: head.x - i * 12, y: head.y }]); await wait(16); }
+    await touch("touchEnd", []);
+    assert.ok((await pageTouches()) > 0, "a swipe over the card's header reaches the page");
+    console.log("phone touch ok: swipe scrolls, tap opens details, pinch zooms, drag pans, map touches stop at the map only while zoomed");
     await p.close();
   }
 
@@ -733,6 +848,91 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     } else {
       console.log("height ok: 600 (CSS lengths skipped, noHeight is not in the card yet)");
     }
+  }
+
+  // 16. Move a hub under another hub with "Connected to" (move a switch from the router to an access point).
+  {
+    const hp = await browser.newPage({ viewport: { width: 1008, height: 1100 } });
+    hp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await hp.goto(BASE + "/scripts/preview/index.html?s=full");
+    await hp.waitForFunction(() => window.ready);
+    const c7 = hp.locator("netorbit-card");
+    await c7.locator(".editbtn").click();
+    const opts = async () => c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.value).sort());
+    // Click a hub and wait for its popup. Right after a redraw (closing a popup redraws the map) the hub is still
+    // moving for a few frames, and a click that lands on it mid-move goes to the map behind it and opens nothing.
+    // So the click waits until the hub has held still for 5 frames, is made once, and the popup must follow it.
+    // There is no retry: a tap that opens nothing on a settled map is a failure.
+    const openHub = async (key) => {
+      const sel = `.node.hub[data-key="hub:${key}"] circle.disc`;
+      await hp.evaluate((sel) => new Promise((resolve, reject) => {
+        const root = document.querySelector("netorbit-card").shadowRoot;
+        const t0 = performance.now();
+        const pos = () => { const d = root.querySelector(sel); if (!d) return null; const b = d.getBoundingClientRect(); return [b.x, b.y, b.width].map((v) => v.toFixed(2)).join(); };
+        let last = null, same = 0;
+        const tick = () => {
+          const now = pos();
+          same = now !== null && now === last ? same + 1 : 0;
+          last = now;
+          if (same >= 5) resolve();
+          else if (performance.now() - t0 > 10000) reject(new Error("the hub never held still: " + sel));
+          else requestAnimationFrame(tick);
+        };
+        tick();
+      }), sel);
+      await c7.locator(sel).click({ force: true });
+      await c7.locator(".pop input.name").waitFor({ timeout: 10000 });
+    };
+    // The router has no parent to pick.
+    await openHub("gateway");
+    assert.strictEqual(await c7.locator(".pop select.parent").count(), 0, "the router has no Connected to picker");
+    await c7.locator(".pop .x").click();
+    // A hub's own descendants are not offered, and neither is the hub itself.
+    await openHub("core");
+    assert.deepStrictEqual(await opts(), ["gateway"], "a switch is offered only hubs that are not below it");
+    await c7.locator(".pop .x").click();
+    // Office Switch hangs off Core Switch. Move it under Hallway AP.
+    await openHub("office");
+    await c7.locator(".pop label", { hasText: "Connected to" }).waitFor({ timeout: 10000 });
+    assert.strictEqual(await c7.locator(".pop label", { hasText: "Connected to" }).count(), 1, "picker is labelled Connected to");
+    await c7.locator(".pop select.parent").waitFor({ timeout: 10000 });
+    assert.strictEqual(await c7.locator(".pop select.parent").inputValue(), "core", "current parent is selected");
+    assert.deepStrictEqual(await opts(), ["core", "down", "garage", "gateway", "up"], "every other real hub is offered, no group or New devices hub");
+    await c7.locator(".pop select.parent").selectOption("up");
+    await c7.locator(".pop .save").click();
+    const hc = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc.at(-1).slice(1), ["update_hub", { hub: "office", parent: "up", config_entry_id: "preview" }]);
+    // Saving without touching Connected to sends no parent.
+    await openHub("office");
+    await c7.locator(".pop input.name").fill("Desk Switch");
+    await c7.locator(".pop .save").click();
+    const hc2 = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc2.at(-1).slice(1), ["update_hub", { hub: "office", name: "Desk Switch", config_entry_id: "preview" }]);
+    // Two hubs with the same name are told apart by their address.
+    await hp.evaluate(() => { const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === "hub:down"); st.attributes.label = "Hallway AP"; window.pushHass(); });
+    await openHub("office");
+    const names = await c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.textContent));
+    assert.strictEqual(names.filter((t) => t.startsWith("Hallway AP (192.0.2.")).length, 2, "same-name hubs show their address: " + names.join("|"));
+    assert.ok(names.includes("Core Switch"), "a unique name stays plain");
+    await c7.locator(".pop .x").click();
+    // A hub whose parent no longer exists shows the router, and saving without a change sends no parent.
+    await hp.evaluate(() => { const st = Object.values(window.card._hass.states).find((x) => x.attributes.node_key === "hub:office"); st.attributes.link = "hub:ghost"; window.pushHass(); });
+    await openHub("office");
+    assert.strictEqual(await c7.locator(".pop select.parent").inputValue(), "gateway", "a missing parent falls back to the router");
+    await c7.locator(".pop input.name").fill("Desk Switch 2");
+    await c7.locator(".pop .save").click();
+    const hc3 = await hp.evaluate(() => window.calls);
+    assert.deepStrictEqual(hc3.at(-1).slice(1), ["update_hub", { hub: "office", name: "Desk Switch 2", config_entry_id: "preview" }]);
+    // Bad data with a loop (Core under Office, Office under Core) still opens the picker, and a hub in the loop is not offered itself.
+    await hp.evaluate(() => { const find = (k) => Object.values(window.card._hass.states).find((x) => x.attributes.node_key === k); find("hub:office").attributes.link = "hub:core"; find("hub:core").attributes.link = "hub:office"; window.pushHass(); });
+    await openHub("up");
+    assert.ok((await opts()).includes("gateway"), "the picker opens on looped data");
+    await c7.locator(".pop .x").click();
+    await openHub("core");
+    assert.ok(!(await opts()).includes("core") && !(await opts()).includes("office"), "a looped hub is not offered itself or its loop partner");
+    await c7.locator(".pop .x").click();
+    console.log("hub parent picker ok:", JSON.stringify(hc.at(-1)[2]));
+    await hp.close();
   }
 
   await browser.close();

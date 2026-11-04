@@ -158,6 +158,39 @@ async def test_stale_and_recovered(hass: HomeAssistant, fake_net, freezer: Froze
     assert [e.data["name"] for e in back] == [name]
 
 
+async def test_addressless_hubs_follow_what_is_behind_them(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """Hubs with no address can't be pinged, so they take their status from the devices behind
+    them (through other addressless hubs too) instead of turning stale once the window passes."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    stale = async_capture_events(hass, "netorbit_device_stale")
+    hubs = [
+        {"id": "shop", "name": "Shop Switch", "host": None, "type": "switch", "parent": "gateway"},
+        {"id": "bed", "name": "Bed Switch", "host": None, "type": "switch", "parent": "shop"},
+        {"id": "spare", "name": "Spare Switch", "host": None, "type": "switch", "parent": "gateway"},
+    ]
+    await _setup(hass, _entry("manual", hubs=hubs, devices={MAC_B: {"name": "Desk PC", "hub": "bed"}}))
+
+    def states() -> dict[str, str]:
+        nodes = _node_states(hass)
+        return {n: nodes[n].state for n in ("Desk PC", "Bed Switch", "Shop Switch", "Spare Switch")}
+
+    assert states() == {"Desk PC": "online", "Bed Switch": "online", "Shop Switch": "online", "Spare Switch": "unknown"}
+
+    # well past the window, still green while the device behind them answers
+    await _advance(hass, freezer, 25*3600)
+    assert states() == {"Desk PC": "online", "Bed Switch": "online", "Shop Switch": "online", "Spare Switch": "unknown"}
+    assert stale == []
+
+    # once everything behind them is stale, so are they
+    fake_net.alive.discard("192.0.2.11")
+    await _advance(hass, freezer, 61)
+    assert states()["Shop Switch"] == "recent"
+    await _advance(hass, freezer, 25*3600)
+    assert states() == {"Desk PC": "stale", "Bed Switch": "stale", "Shop Switch": "stale", "Spare Switch": "unknown"}
+    assert sorted(e.data["name"] for e in stale) == ["Bed Switch", "Desk PC", "Shop Switch"]
+
+
 async def test_options_hubs_and_devices(hass: HomeAssistant, fake_net) -> None:
     fake_net.alive = {GATEWAY, "192.0.2.5", "192.0.2.11"}
     fake_net.arp = {"192.0.2.11": MAC_B}

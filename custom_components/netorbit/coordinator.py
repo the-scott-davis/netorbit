@@ -80,6 +80,7 @@ from .logic import (
     is_random_mac,
     normalize_mac,
     parse_proc_arp,
+    rollup_status,
     short_hostname,
     subnet_hosts,
 )
@@ -1008,6 +1009,12 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
             )
 
+        # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,
+        # so it takes its status from what's behind it instead of going stale after the window.
+        addressless = {f"hub:{h['id']}": h["id"] for h in self.opts[CONF_HUBS] if not h.get("host")}
+        if addressless:
+            self._rollup_hubs(nodes, addressless)
+
         if self.opts[CONF_CHECK_INTERNET]:
             # Above the router. Red (stale) only when the router answers and the internet doesn't;
             # with the router down too, NetOrbit can't tell, so the status is left unknown.
@@ -1048,6 +1055,31 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             nodes=nodes, new_devices=new_devices, suggested_hubs=suggestions, sources=sorted(sources),
             last_scan=self._last_sweep.isoformat() if self._last_sweep else None,
         )
+
+    @staticmethod
+    def _rollup_hubs(nodes: dict[str, Node], addressless: dict[str, str]) -> None:
+        """Set each addressless hub's status and last seen from its children, deepest hubs first."""
+        children: dict[str, list[Node]] = {}
+        for node in nodes.values():
+            if node.link:
+                children.setdefault(node.link, []).append(node)
+        done: set[str] = set()
+
+        def resolve(key: str) -> None:
+            if key in done:
+                return
+            done.add(key)  # before recursing, so a bad parent loop can't recurse forever
+            kids = children.get(addressless[key], [])
+            for kid in kids:
+                if kid.key in addressless:
+                    resolve(kid.key)
+            node = nodes[key]
+            node.status = rollup_status([(k.status, k.sleepy) for k in kids])
+            seen = [k.last_seen for k in kids if k.last_seen and (k.status == STATUS_ONLINE or not k.sleepy)]
+            node.last_seen = max(seen, key=datetime.fromisoformat) if seen else None
+
+        for key in addressless:
+            resolve(key)
 
     @staticmethod
     def _status(online: bool, rec: dict[str, Any], now: datetime, stale_after: timedelta) -> str:
@@ -1127,11 +1159,19 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         ref = str(ref).strip().removeprefix("hub:")
         low = ref.lower()
         mac = normalize_mac(ref)
+        # An exact id wins over a name: the card sends ids, and a renamed hub's old id can equal another hub's name.
+        for hub in self.opts[CONF_HUBS]:
+            if hub["id"] == ref:
+                return hub["id"]
         for hub in self.opts[CONF_HUBS]:
             if hub["id"] == ref or (hub.get("name") or "").lower() == low or hub.get("host") == ref:
                 return hub["id"]
-            if mac and macs_close(hub.get("mac") or (self._seen.get(f"hub:{hub['id']}") or {}).get("mac"), mac):
-                return hub["id"]
+        if mac:
+            # The hub with exactly this MAC first; a near one (a radio MAC a few off the LAN MAC) only
+            # when it is the only hub that close, so neighbouring access points are never confused.
+            hub_id = self._hub_for_mac(mac)
+            if hub_id:
+                return hub_id
         partial = [h["id"] for h in self.opts[CONF_HUBS] if low in (h.get("name") or "").lower()]
         return partial[0] if len(partial) == 1 else None
 

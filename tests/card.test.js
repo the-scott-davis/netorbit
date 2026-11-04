@@ -315,3 +315,72 @@ test("with names shown, ordinary names stay", () => {
   const fine = ["Living Room TV", "Office Switch", "Cafe", "Deadbeef Lamp", "Facade Light", "Decade", "Echo Dot 3", "Pixel 7 Pro", "Room 12", "Hallway 2nd Floor", "TV: Den", "Attic AP2"];
   for (const n of fine) assert.strictEqual(sharedLabel(n), n, n + " should stay");
 });
+
+// The share video's frame pump: animation time comes from the frame number, so a late timer never makes it jump.
+const { noFramePump } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+
+function fakeClock() {
+  const c = { now: 0, q: [], id: 0 };
+  c.later = (fn, ms) => { const id = ++c.id; c.q.push({ id, at: c.now + ms, fn }); return id; };
+  c.clear = (id) => { c.q = c.q.filter((x) => x.id !== id); };
+  // Runs timers in order; `late(i)` says how many ms a timer fires after it was due (a stalled main thread).
+  c.run = (late) => {
+    let n = 0;
+    while (c.q.length && n++ < 10000) {
+      c.q.sort((a, b) => a.at - b.at || a.id - b.id);
+      const x = c.q.shift();
+      c.now = Math.max(c.now, x.at) + (late ? late(n) : 0);
+      x.fn();
+    }
+  };
+  return c;
+}
+
+function pumpRun(late, opts) {
+  const clk = fakeClock();
+  const painted = [], pushed = [];
+  let finished = 0;
+  const o = Object.assign({ fps: 30, frames: 120, lead: 15 }, opts);
+  noFramePump(Object.assign(o, {
+    frame: (t, i) => { painted.push(t); pushed.push(i); },
+    done: () => finished++,
+    now: () => clk.now, later: clk.later, clear: clk.clear,
+  }));
+  clk.run(late);
+  return { painted, pushed, finished, clk };
+}
+
+test("the video pump holds the first frame, then advances exactly 1/30 s per frame", () => {
+  const { painted, pushed, finished } = pumpRun();
+  assert.strictEqual(painted.length, 120);
+  assert.strictEqual(finished, 1);
+  assert.deepStrictEqual(pushed, painted.map((_, i) => i), "one frame per tick, in order");
+  assert.ok(painted.slice(0, 16).every((t) => t === 0), "opening held");
+  for (let i = 16; i < painted.length; i++) assert.ok(Math.abs(painted[i] - painted[i - 1] - 1 / 30) < 1e-9, `step ${i}`);
+  assert.ok(Math.abs(painted[119] - 104 / 30) < 1e-9);
+});
+
+test("a stalled timer freezes the video but never makes the animation jump", () => {
+  // Frames 20 to 25 each fire 700 ms late, and one later tick is 3 s late.
+  const { painted, finished } = pumpRun((n) => (n >= 20 && n <= 25 ? 700 : n === 60 ? 3000 : 0));
+  assert.strictEqual(painted.length, 120);
+  assert.strictEqual(finished, 1);
+  for (let i = 16; i < painted.length; i++) assert.ok(Math.abs(painted[i] - painted[i - 1] - 1 / 30) < 1e-9, `step ${i} jumped`);
+});
+
+test("a late timer is followed by one frame per tick, not a burst that skips ahead", () => {
+  const { painted, clk } = pumpRun((n) => (n === 10 ? 1000 : 0), { frames: 40, lead: 0 });
+  assert.strictEqual(painted.length, 40);
+  assert.deepStrictEqual(painted.map((t) => Math.round(t * 30)), painted.map((_, i) => i));
+  assert.ok(clk.now >= 1000);
+});
+
+test("stop() ends the pump and clears its timer", () => {
+  const clk = fakeClock();
+  let n = 0, finished = 0, p;
+  p = noFramePump({ fps: 30, frames: 100, lead: 0, frame: () => { if (++n === 5) p.stop(); }, done: () => finished++, now: () => clk.now, later: clk.later, clear: clk.clear });
+  clk.run();
+  assert.strictEqual(n, 5);
+  assert.strictEqual(finished, 0);
+  assert.strictEqual(clk.q.length, 0);
+});

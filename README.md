@@ -35,7 +35,7 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
   - **Grandstream GWN access points with SNMP:** NetOrbit reads each access point's own Wi-Fi client list, so every wireless client shows under the access point it is connected to.
   - **UniFi**, and other integrations that report which access point each client uses (Netgear/Orbi's per-device "connected AP" sensors, for example).
 - **Lets you place the rest, three ways:**
-  1. **Drag and drop on the card.** Tap *Edit layout*, drag a device onto its hub, or tap it for *Move to*, *Make it a hub* and *Automatic*.
+  1. **Drag and drop on the card.** Tap *Edit layout*, drag a device onto its hub, or tap it for *Move to*, *Make it a hub* and *Automatic*. To move a hub (a switch from the router to an access point, say), tap the hub in Edit layout and pick *Connected to*.
   2. **Paste a client list.** Copy the client list from an access point's web page or a mesh app, paste it into NetOrbit, pick the hub. Done.
   3. **Ask an AI assistant.** NetOrbit exposes tools to Claude, ChatGPT and other assistants through Home Assistant's MCP Server, and to Assist. The assistant walks you through each piece of gear and does the placing. See [docs/ASSISTANT.md](docs/ASSISTANT.md).
 - **Looks good even when it knows nothing.** If no source reports the layout, devices are grouped by type (TV and media, computers and phones, cameras, smart home) until you place them.
@@ -175,6 +175,8 @@ Under the integration's **Configure** menu:
 
 **Allowed to sleep** is for TVs, consoles and anything else that's off a lot. They still show their status but never fire the stale event.
 
+**Hubs with no IP**, such as an unmanaged switch or an access point in bridge mode, can't be pinged, so they take their status from what's behind them: green if anything behind them is online, yellow if something was seen recently, red only when nothing behind them has been seen for the "not seen" window, and grey when nothing is behind them yet. Sleeping devices that are off don't count.
+
 **The internet check** (on by default) puts an Internet node just above your router. Each ping round also pings two public DNS servers, Cloudflare's `1.1.1.1` and Google's `8.8.8.8`. The node turns red ("Internet down") when neither answers for two rounds in a row while your router still answers, so you can tell an internet outage from a Wi-Fi problem. If the router isn't answering either, it shows grey, because NetOrbit can't tell. Turn it off under **Settings** if you'd rather NetOrbit never sends anything outside your network.
 
 ### DHCP, MAC addresses and keeping your setup
@@ -227,7 +229,7 @@ Hover a device for details, tap it for its history. Pinch or double-tap to zoom 
 
 ## Entities, events and services
 
-- One sensor per hub and tracked device. State is `online`, `recent` or `stale`. Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
+- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
 - `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`. While a network scan runs it also shows `scanning: true`, the current `scan_phase` (`ping`, `arp`, `names`, `snmp`, `layout`), a rough `scan_progress` (0 to 100) and how many addresses it has `found` so far. `first_scan_done` turns true once the very first scan on this install has finished.
 - `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
