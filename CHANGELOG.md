@@ -2,11 +2,16 @@
 
 ## Unreleased
 
+### Added
+- **Grandstream GWN access points over SNMP.** NetOrbit reads the Wi-Fi client table (`GRANDSTREAM-GWN-MIB`) from Grandstream access points that you have as hubs, and places those clients under the access point they are connected to. Not yet tested on real Grandstream hardware. Thanks to @fluffymadness for the request and the MIB details (#18).
+- **Rename a device from the card, and tell similar devices apart** (#24). In Edit layout, tap a device and use the new Name field; empty it to go back to the automatic name. The name is saved by MAC address as NetOrbit's name for the device, so it follows the device across IP changes, and the sensor in Home Assistant takes it. A name you set earlier in the sensor's entity settings is updated too, so it does not hide the new one. The device menu now shows IP, MAC, maker and last seen even when `show_ip` is off, and notes that a name may not stick on a private (randomized) MAC. Menus also stay inside the map on small phones. `netorbit.track_device` and the AI assistant's update tool now treat an empty name as "clear my name".
+
 ### Fixed
 - A hub given by MAC now matches exactly before a near MAC is considered, so access points bought together are not confused.
 - **A touch on the map no longer swipes the dashboard to another view** while the map is zoomed in or in Edit layout, on dashboards that swipe between views (the swipe-navigation plugin and the like listen further up the page and read a one-finger pan as a swipe). At the whole map a sideways swipe still changes views as before, and the card's header always does.
 - **Assistant tools on Home Assistant 2026.10.** NetOrbit's AI assistant tools now answer in the format Home Assistant 2026.10 expects (thanks @xlntech1, #30). No more deprecation warning on every call, and they keep working after 2027.11, when the old format stops being accepted. Older Home Assistant versions work as before.
 - The assistant tool that undoes hand placement (`netorbit_reset_placement`) is now marked destructive, since the placements it clears can only be set again by hand (#45).
+- Saved videos start right away and end without a long pause.
 
 ## 0.2.10
 

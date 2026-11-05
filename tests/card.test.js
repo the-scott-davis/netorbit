@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: () => {} };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -316,6 +316,12 @@ test("with names shown, ordinary names stay", () => {
   for (const n of fine) assert.strictEqual(sharedLabel(n), n, n + " should stay");
 });
 
+test("a private (locally administered) MAC is spotted, a normal one is not", () => {
+  // example-ok: synthetic values, the second hex digit is what makes a MAC private
+  for (const m of ["02:00:5E:00:53:01", "06-00-5e-00-53-01", "0a0000000001", "FE:00:5E:00:53:01", "AE:00:5E:00:53:01"]) assert.ok(noPrivateMac(m), m); // example-ok
+  for (const m of ["00:00:5E:00:53:01", "", null, undefined, "02:00"]) assert.ok(!noPrivateMac(m), String(m));
+});
+
 // The share video's frame pump: animation time comes from the frame number, so a late timer never makes it jump.
 const { noFramePump } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
@@ -340,7 +346,7 @@ function pumpRun(late, opts) {
   const clk = fakeClock();
   const painted = [], pushed = [];
   let finished = 0;
-  const o = Object.assign({ fps: 30, frames: 120, lead: 15 }, opts);
+  const o = Object.assign({ fps: 30, frames: 120, lead: 8 }, opts);
   noFramePump(Object.assign(o, {
     frame: (t, i) => { painted.push(t); pushed.push(i); },
     done: () => finished++,
@@ -355,9 +361,9 @@ test("the video pump holds the first frame, then advances exactly 1/30 s per fra
   assert.strictEqual(painted.length, 120);
   assert.strictEqual(finished, 1);
   assert.deepStrictEqual(pushed, painted.map((_, i) => i), "one frame per tick, in order");
-  assert.ok(painted.slice(0, 16).every((t) => t === 0), "opening held");
-  for (let i = 16; i < painted.length; i++) assert.ok(Math.abs(painted[i] - painted[i - 1] - 1 / 30) < 1e-9, `step ${i}`);
-  assert.ok(Math.abs(painted[119] - 104 / 30) < 1e-9);
+  assert.ok(painted.slice(0, 9).every((t) => t === 0), "opening held");
+  for (let i = 9; i < painted.length; i++) assert.ok(Math.abs(painted[i] - painted[i - 1] - 1 / 30) < 1e-9, `step ${i}`);
+  assert.ok(Math.abs(painted[119] - 111 / 30) < 1e-9);
 });
 
 test("a stalled timer freezes the video but never makes the animation jump", () => {
@@ -365,7 +371,7 @@ test("a stalled timer freezes the video but never makes the animation jump", () 
   const { painted, finished } = pumpRun((n) => (n >= 20 && n <= 25 ? 700 : n === 60 ? 3000 : 0));
   assert.strictEqual(painted.length, 120);
   assert.strictEqual(finished, 1);
-  for (let i = 16; i < painted.length; i++) assert.ok(Math.abs(painted[i] - painted[i - 1] - 1 / 30) < 1e-9, `step ${i} jumped`);
+  for (let i = 9; i < painted.length; i++) assert.ok(Math.abs(painted[i] - painted[i - 1] - 1 / 30) < 1e-9, `step ${i} jumped`);
 });
 
 test("a late timer is followed by one frame per tick, not a burst that skips ahead", () => {
@@ -373,6 +379,21 @@ test("a late timer is followed by one frame per tick, not a burst that skips ahe
   assert.strictEqual(painted.length, 40);
   assert.deepStrictEqual(painted.map((t) => Math.round(t * 30)), painted.map((_, i) => i));
   assert.ok(clk.now >= 1000);
+});
+
+test("the video is about 7.2 s: a quarter second lead, the scan and reveal, then a short hold on the finished map", () => {
+  // The same frame count the card computes: lead + ceil((PRE + reveal end + tail) * fps) + 1.
+  const lead = Math.round(0.25 * 30);
+  const frames = lead + Math.ceil((2.05 + 4 + 0.8) * 30) + 1;
+  const { painted, finished } = pumpRun(null, { frames, lead });
+  assert.strictEqual(lead, 8);
+  assert.strictEqual(frames, 215);
+  assert.strictEqual(painted.length, frames);
+  assert.strictEqual(finished, 1);
+  assert.ok(Math.abs(painted.length / 30 - 7.17) < 0.01);
+  // The animation reaches the end of the reveal plus the 0.8 s hold on the very last frame.
+  assert.ok(Math.abs(painted[frames - 1] - (frames - 1 - lead) / 30) < 1e-9);
+  assert.ok(painted[frames - 1] >= 2.05 + 4 + 0.8 - 1 / 30);
 });
 
 test("stop() ends the pump and clears its timer", () => {

@@ -32,6 +32,7 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
 - **Finds your network gear.** Spots routers, switches, access points and mesh nodes from who made them, what they call themselves, what they announce on the network, and what other integrations already know. Obvious ones are added for you. Likely ones show up with a spinning pink ring and a one-tap "It's a hub / Not a hub".
 - **Works out where each device connects, when your network will say:**
   - **Managed switches with SNMP:** NetOrbit reads their MAC address tables and works out which switch port, and so which access point, every device is behind. No port mapping needed.
+  - **Grandstream GWN access points with SNMP:** NetOrbit reads each access point's own Wi-Fi client list, so every wireless client shows under the access point it is connected to.
   - **UniFi**, and other integrations that report which access point each client uses (Netgear/Orbi's per-device "connected AP" sensors, for example).
 - **Lets you place the rest, three ways:**
   1. **Drag and drop on the card.** Tap *Edit layout*, drag a device onto its hub, or tap it for *Move to*, *Make it a hub* and *Automatic*. To move a hub (a switch from the router to an access point, say), tap the hub in Edit layout and pick *Connected to*.
@@ -83,6 +84,14 @@ Whatever NetOrbit can't work out, you can fix in about a minute. Full guide, inc
 | Drag a device onto its hub | Confirm a possible hub | On a phone |
 | --- | --- | --- |
 | ![](docs/howto-drag.gif) | ![](docs/howto-confirm-hub.gif) | ![](docs/howto-phone-move.gif) |
+
+### Renaming a device and telling similar devices apart
+
+In **Edit layout**, tap a device to open its menu. It has a **Name** field, like the one hubs have: type a name and press **Save name** (or Enter). Empty the field to go back to the automatic name. The name follows the device's MAC address, so it survives a new IP address and restarts. NetOrbit saves it as its own name for the device, and the device's sensor in Home Assistant takes that name, so the map, Home Assistant, backups and AI assistants all show the same one. If you had set a name in the sensor's entity settings in Home Assistant, that name is changed too, because it would otherwise hide the new one. Names are cut at 64 characters.
+
+The menu also shows the device's IP address, MAC address, maker and when it was last seen, even when `show_ip` is off, so you can tell which is which before you name it. Devices that use a private (randomized) MAC address get a note that the name may not stick if the device changes its address.
+
+Tip for two devices that look the same, such as two from the same maker: power one off, or look up its IP address in its own app, then see which circle goes grey or which IP matches. Name it, then do the other.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
@@ -187,7 +196,7 @@ Most homes hand out addresses with DHCP, so a device's IP can change at any time
 - **Everything is keyed by MAC address.** Names, icons, hub placement, "allowed to sleep" and history all follow the device's MAC, so a new IP changes nothing. When a device's IP changes, NetOrbit just pings the new one.
 - **Hubs follow their MAC too.** If an access point gets a new IP, NetOrbit notices on the next sweep and updates it.
 - **Devices added by IP switch to their MAC** as soon as NetOrbit sees them on the network, so they survive the next DHCP change as well.
-- **Renaming works either way.** Rename in NetOrbit's settings, from an AI assistant, or in Home Assistant's own entity settings; the map uses whichever name you set.
+- **Renaming works either way.** Rename from the card (Edit layout, tap a device), in NetOrbit's settings, from an AI assistant, or in Home Assistant's own entity settings; the map uses the newest name you set. The one exception is a name typed into Home Assistant's entity settings, which wins over NetOrbit's name until you clear it there (renaming from the card changes it for you).
 - **Back up your setup.** `netorbit.export_config` returns every name, icon, hub and placement, keyed by MAC. `netorbit.import_config` restores it (merging by default), for example after reinstalling.
 
 Tips for the tidiest map:
@@ -203,6 +212,7 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 - If your switches still use the factory read-only community, there's nothing to do.
 - If you changed it (good idea), enter it under **Settings > SNMP community**. Letters and numbers only work best; some switches silently ignore communities with symbols.
 - Where to turn SNMP on for UniFi, Omada and other switches, and which switches don't have it: [docs/SETUP.md](docs/SETUP.md#2-turn-on-snmp-on-managed-switches).
+- Grandstream GWN access points: turn SNMP on in the access point and NetOrbit reads its Wi-Fi client list. See [docs/SETUP.md](docs/SETUP.md#grandstream-gwn-access-points).
 - Consumer routers and mesh systems don't support SNMP. That's normal.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
