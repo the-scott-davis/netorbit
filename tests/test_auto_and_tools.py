@@ -19,6 +19,7 @@ SW_MAC = "00:00:5e:00:53:02"
 AP_MAC = "00:00:5f:00:53:04"  # example-ok: synthetic test value
 TV_MAC = "00:00:5e:00:53:10"
 NAS_MAC = "00:00:5e:00:53:12"
+MESH_MAC = "00:00:5e:00:53:30"
 MAYBE_MAC = "00:00:5f:00:53:20"  # example-ok: synthetic test value
 # What Home Assistant 2026.10 logs when a tool answers with a plain object instead of a ToolResult.
 DEPRECATED_ANSWER = "returns a JSON object from a tool, which is deprecated; return a ToolResult instead"
@@ -233,6 +234,35 @@ async def test_moving_a_device_does_not_wait_for_pings(hass: HomeAssistant, fake
     assert _node_states(hass)["living-room-tv"].attributes["link"] == "hub:gateway"
 
 
+async def test_mesh_node_locked_behind_an_ap_keeps_the_aps_clients(hass: HomeAssistant, fake_net) -> None:
+    """A mesh node bridging through an access point shares the AP's switch port; the locked parent says which is the uplink."""
+    hubs = [
+        {"id": "core_switch", "name": "core-switch", "host": "192.0.2.2", "mac": SW_MAC, "type": "switch", "parent": "gateway"},
+        {"id": "hall_ap", "name": "Hall AP", "host": "192.0.2.6", "mac": AP_MAC, "type": "access_point", "parent": "core_switch"},
+        {"id": "shed_mesh", "name": "Shed mesh", "host": "192.0.2.7", "mac": MESH_MAC, "type": "mesh_node", "parent": "hall_ap", "parent_locked": True},
+    ]
+    fake_net.alive = {GATEWAY, "192.0.2.2", "192.0.2.6", "192.0.2.7", "192.0.2.10", "192.0.2.12"}
+    fake_net.arp = {
+        GATEWAY: GW_MAC, "192.0.2.2": SW_MAC, "192.0.2.6": AP_MAC, "192.0.2.7": MESH_MAC,
+        "192.0.2.10": TV_MAC, "192.0.2.12": NAS_MAC,
+    }
+    fake_net.dns = {"192.0.2.10": "living-room-tv.lan", "192.0.2.12": "nas.lan"}
+    fake_net.snmp = {"192.0.2.2": ("public", ProbeResult(descr="8-port PoE managed switch", name="core-switch", bridge=True))}
+    # The switch sees the AP, the mesh node and the TV all on port 6.
+    fake_net.tables = {"192.0.2.2": {GW_MAC: 1, AP_MAC: 6, MESH_MAC: 6, TV_MAC: 6, NAS_MAC: 3}}
+    entry = _entry("auto", hubs=hubs)
+    await _setup(hass, entry)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+
+    nodes = _node_states(hass)
+    assert nodes["Hall AP"].attributes["link"] == "hub:core_switch"
+    assert nodes["Shed mesh"].attributes["link"] == "hub:hall_ap"
+    assert nodes["living-room-tv"].attributes["link"] == "hub:hall_ap"
+    assert nodes["living-room-tv"].attributes["placement"] == "snmp"
+    assert nodes["nas"].attributes["link"] == "hub:core_switch"
+
+
 async def test_import_client_list(hass: HomeAssistant, fake_net) -> None:
     fake_net.alive = {GATEWAY, "192.0.2.10", "192.0.2.12"}
     fake_net.arp = {"192.0.2.10": TV_MAC, "192.0.2.12": NAS_MAC}
@@ -343,7 +373,7 @@ async def test_llm_tools(hass: HomeAssistant, fake_net, hass_admin_user, caplog)
             "netorbit_get_map": (True, False, True, False),
             "netorbit_assign_devices": (False, False, True, False),
             "netorbit_import_client_list": (False, False, True, False),
-            "netorbit_reset_placement": (False, False, True, False),
+            "netorbit_reset_placement": (False, True, True, False),
             "netorbit_add_hub": (False, False, False, False),
             "netorbit_update_hub": (False, False, True, False),
             "netorbit_remove_hub": (False, True, True, False),
@@ -378,6 +408,12 @@ async def test_llm_tools(hass: HomeAssistant, fake_net, hass_admin_user, caplog)
     assert not any(f"provides the LLM tool {t.name} without an integration" in caplog.text for t in api.tools)
     nas = _node_states(hass)["Backup NAS"]
     assert nas.attributes["sleepy"] is True and nas.attributes["link"] == "hub:attic_ap"
+    # An empty name clears the one set, and a call with no name leaves it alone.
+    result = _data(await api.async_call_tool(llm.ToolInput("netorbit_update_device", {"device": "nas", "allowed_to_sleep": False})))
+    assert result["device"] == "Backup NAS" and "Backup NAS" in _node_states(hass)
+    result = _data(await api.async_call_tool(llm.ToolInput("netorbit_update_device", {"device": "nas", "name": "  "})))
+    assert "error" not in result and result["device"] != "Backup NAS" and "Backup NAS" not in _node_states(hass)
+    await api.async_call_tool(llm.ToolInput("netorbit_update_device", {"device": "nas", "name": "Backup NAS"}))
     garage = _node_states(hass)["Attic AP"]
     assert garage.attributes["link"] == "hub:core_switch"
 

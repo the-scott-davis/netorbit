@@ -249,6 +249,7 @@ async def update_device(
     for label, value in (("name", name), ("icon", icon)):
         if value is None:
             continue
+        # An empty name or icon clears the one you set, so the device goes back to its automatic one.
         if value.strip():
             cfg[label] = value.strip()
         else:
@@ -329,7 +330,13 @@ async def track(hass, entry, coord, mac: str | None = None, ip: str | None = Non
     cfg["tracked"] = True
     if ip:
         cfg["host"] = ip
-    for field in ("name", "icon", "sleepy"):
+    if fields.get("name") is not None:
+        # An empty name clears the one you set, so the device goes back to its automatic name.
+        if fields["name"].strip():
+            cfg["name"] = fields["name"].strip()
+        else:
+            cfg.pop("name", None)
+    for field in ("icon", "sleepy"):
         if fields.get(field) is not None:
             cfg[field] = fields[field]
     if fields.get("hub"):

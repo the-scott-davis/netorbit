@@ -8,11 +8,23 @@
 - **Prefer DNS and Bonjour names** (Settings, off by default). The name your network gives a device comes first, before names from other integrations, and replaces names NetOrbit made up for hubs, such as *Router*. Names you typed are kept. Every sensor now also carries the full DNS name as `fqdn`.
 
 ### Fixed
-- A hub given by MAC now matches exactly before a near MAC is considered, so access points bought together are not confused.
-- **A touch on the map no longer swipes the dashboard to another view** while the map is zoomed in or in Edit layout, on dashboards that swipe between views (the swipe-navigation plugin and the like listen further up the page and read a one-finger pan as a swipe). At the whole map a sideways swipe still changes views as before, and the card's header always does.
-- **Assistant tools on Home Assistant 2026.10.** NetOrbit's AI assistant tools now answer in the format Home Assistant 2026.10 expects (thanks @xlntech1, #30). No more deprecation warning on every call, and they keep working after 2027.11, when the old format stops being accepted. Older Home Assistant versions work as before.
 - The first change made in Settings after a restart was ignored when NetOrbit had saved something itself during its first sweep (a hub's MAC address, a DHCP move).
 - Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
+
+## 0.3.0
+
+### Added
+- **Grandstream GWN access points over SNMP.** NetOrbit reads the Wi-Fi client table (`GRANDSTREAM-GWN-MIB`) from Grandstream access points you have as hubs and places their clients under the access point they're connected to. Not yet tested on real Grandstream hardware, so reports are welcome (thanks @fluffymadness for the request and the MIB details, #18).
+- **Rename a device from the card** (#24). In Edit layout, tap a device and use the Name field; empty it to go back to the automatic name. The name is saved by MAC address, so it follows the device across IP changes, and the device's sensor takes it too. The device menu now shows IP, MAC, maker and last seen even with `show_ip` off, notes when a private (randomized) MAC may not keep a name, and stays inside the map on small phones.
+
+### Fixed
+- **A device that leaves no longer stays online when DHCP hands its address to another device** (thanks @ninchistudios, #47). A ping reply now only counts for the device whose MAC answered, read from ARP, so the device that left goes offline and its alert fires. Hubs given a base MAC, devices behind a MAC-rewriting repeater, devices added by IP only and the Home Assistant host count as before.
+- **A hub given by MAC now matches exactly** before a near MAC is considered, so access points bought together aren't confused (thanks @xlntech1, #41).
+- **A mesh node that bridges through an access point** no longer sends that switch port's devices back to the switch once you lock its parent to the access point (thanks @xlntech1, #51).
+- **Touching the map no longer swipes the dashboard to another view** while the map is zoomed in, in Edit layout or mid-pinch, on dashboards that swipe between views. At the whole map a sideways swipe still changes views (thanks @xlntech1, #31).
+- **Assistant tools on Home Assistant 2026.10.** NetOrbit's AI assistant tools now answer in the format Home Assistant 2026.10 expects (thanks @xlntech1, #30). No more deprecation warning on every call, and they keep working after 2027.11, when the old format stops being accepted. Older Home Assistant versions work as before.
+- **The assistant tool that undoes hand placement** (`netorbit_reset_placement`) is now marked destructive, since those placements can only be set again by hand (thanks @xlntech1, #52).
+- **Saved videos start right away** and end without the long pause at the start and end (#29).
 
 ## 0.2.10
 
