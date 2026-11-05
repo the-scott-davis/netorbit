@@ -555,6 +555,49 @@ async def test_prefer_dns_names(hass: HomeAssistant, fake_net) -> None:
     assert "printer-hall" in _node_states(hass)
 
 
+async def test_import_checks_managed_by_and_fields(hass: HomeAssistant, fake_net) -> None:
+    """An import goes through the same checks as the services: bad values are left out, the rest applies, and a
+    broken value already saved can't make the refreshes fail."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    coord = entry.runtime_data
+    await hass.services.async_call(DOMAIN, "update_hub", {"hub": "gateway", "managed_by": "ISP", "fields": {"Model": "Edge 1"}}, blocking=True)
+    await hass.async_block_till_done()
+
+    exported = await hass.services.async_call(DOMAIN, "export_config", {}, blocking=True, return_response=True)
+    exported["hubs"][0]["fields"] = "abc"  # not a mapping: the hub keeps the fields it has
+    exported["hubs"][0]["managed_by"] = "m" * 501  # too long: the hub keeps its Managed by
+    many = {f"F{i}": "v" for i in range(25)}
+    exported["devices"][MAC_B] = {"name": "Printer", "managed_by": ["a", "list"], "fields": {"Ok": "fine", "Long": "y" * 501, "Rack": 2, **many}}
+    res = await hass.services.async_call(DOMAIN, "import_config", {"data": exported}, blocking=True, return_response=True)
+    await hass.async_block_till_done()
+    # hub fields + hub managed_by + device managed_by + Long + Rack + the 6 fields past the limit of 20
+    assert res["skipped"] == 11
+
+    hub = next(h for h in entry.options["hubs"] if h["id"] == "gateway")
+    assert hub["fields"] == {"Model": "Edge 1"} and hub["managed_by"] == "ISP"
+    dev = entry.options["devices"][MAC_B]
+    assert dev["name"] == "Printer" and "managed_by" not in dev
+    assert list(dev["fields"]) == ["Ok", *[f"F{i}" for i in range(19)]]
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.last_update_success
+    assert _node_states(hass)["Printer"].attributes["fields"]["Ok"] == "fine"
+
+    # A broken value saved some other way (an edit by hand) doesn't stop the refreshes either.
+    opts = {**entry.options, "hubs": [{**h, "fields": "abc", "managed_by": 5} if h["id"] == "gateway" else h for h in entry.options["hubs"]]}
+    hass.config_entries.async_update_entry(entry, options=opts)
+    await hass.async_block_till_done()
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.last_update_success
+    router = _node_states(hass)["Router"].attributes
+    assert router["fields"] == {} and router["managed_by"] is None
+
+
 async def test_managed_by_and_fields(hass: HomeAssistant, fake_net) -> None:
     """Free text on devices and hubs: services, attributes, export/import and the options flow."""
     fake_net.alive = {GATEWAY, "192.0.2.11"}

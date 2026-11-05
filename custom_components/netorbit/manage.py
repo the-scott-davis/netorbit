@@ -47,7 +47,7 @@ def set_fields(cfg: dict[str, Any], managed_by: str | None = None, fields: dict[
     if fields is not None:
         if not isinstance(fields, dict):
             raise ManageError("fields must be a mapping of label to value")
-        current: dict[str, str] = dict(cfg.get("fields") or {})
+        current: dict[str, str] = stored_text(cfg)["fields"]
         for raw_label, raw_value in fields.items():
             label = " ".join(str(raw_label).split())
             if not label:
@@ -69,6 +69,20 @@ def set_fields(cfg: dict[str, Any], managed_by: str | None = None, fields: dict[
             cfg.pop("fields", None)
 
 
+def stored_text(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Managed by and the extra fields as saved on a hub or device, leaving out anything that is not text.
+
+    The coordinator builds every node from this, so a value edited by hand in the settings (or saved by an import
+    before imports were checked) can't make every refresh fail.
+    """
+    managed_by = cfg.get("managed_by")
+    fields = cfg.get("fields")
+    return {
+        "managed_by": managed_by if isinstance(managed_by, str) and managed_by else None,
+        "fields": {k: v for k, v in fields.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(fields, dict) else {},
+    }
+
+
 def parse_fields_text(text: str | None) -> dict[str, str]:
     """'Label: value' per line (the options flow) -> {label: value}. A blank value removes the label."""
     out: dict[str, str] = {}
@@ -83,7 +97,7 @@ def parse_fields_text(text: str | None) -> dict[str, str]:
 
 
 def fields_to_text(fields: dict[str, str] | None) -> str:
-    return "\n".join(f"{k}: {v}" for k, v in (fields or {}).items())
+    return "\n".join(f"{k}: {v}" for k, v in (fields.items() if isinstance(fields, dict) else ()))
 
 
 def copy_options(opts: dict[str, Any]) -> dict[str, Any]:

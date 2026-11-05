@@ -5,6 +5,7 @@ Each returns a small dict describing what happened, in words an assistant can re
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,8 @@ from .logic import extract_addresses, normalize_mac
 
 if TYPE_CHECKING:
     from .coordinator import NetOrbitCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ActionError(manage.ManageError):
@@ -285,16 +288,51 @@ def export_config(coord: NetOrbitCoordinator) -> dict[str, Any]:
     }
 
 
+TEXT_KEYS = ("managed_by", "fields")
+
+
+def _import_text(target: dict[str, Any], src: dict[str, Any]) -> int:
+    """Set Managed by and the extra fields of an imported hub or device on `target` through manage.set_fields, so
+    an import gets the same checks as the services and forms. A value that fails them is left out and the setting
+    already there is kept; an imported list of fields replaces the old one. Returns how many values were left out."""
+    skipped = 0
+    if "managed_by" in src:
+        value = src["managed_by"]
+        try:
+            if value is not None and not isinstance(value, str):
+                raise manage.ManageError("Managed by must be text")
+            manage.set_fields(target, managed_by=value or "")
+        except manage.ManageError:
+            skipped += 1
+    if "fields" in src:
+        fields = src["fields"]
+        if isinstance(fields, dict):
+            target.pop("fields", None)
+            for label, value in fields.items():
+                try:
+                    if not isinstance(value, str):
+                        raise manage.ManageError("A field value must be text")
+                    manage.set_fields(target, fields={label: value})
+                except manage.ManageError:
+                    skipped += 1
+        elif fields is not None:
+            skipped += 1
+    return skipped
+
+
 async def import_config(hass, entry, coord, data: dict[str, Any], replace: bool = False) -> dict[str, Any]:
     """Restore an export. By default it merges: imported settings win, nothing else is removed."""
     if not isinstance(data, dict) or data.get("netorbit_export") != EXPORT_VERSION:
         raise ActionError("That is not a NetOrbit export")
     opts = _opts(coord)
     hubs = {h["id"]: h for h in ([] if replace else opts[CONF_HUBS])}
+    skipped = 0
     for h in data.get("hubs", []):
         if not isinstance(h, dict) or not h.get("id"):
             continue
-        hubs[h["id"]] = {**hubs.get(h["id"], {}), **h}
+        merged = {**hubs.get(h["id"], {}), **{k: v for k, v in h.items() if k not in TEXT_KEYS}}
+        skipped += _import_text(merged, h)
+        hubs[h["id"]] = merged
     if ROOT_HUB_ID not in hubs:
         hubs[ROOT_HUB_ID] = next(x for x in opts[CONF_HUBS] if x["id"] == ROOT_HUB_ID)
     hubs[ROOT_HUB_ID]["parent"] = None
@@ -310,13 +348,19 @@ async def import_config(hass, entry, coord, data: dict[str, Any], replace: bool 
         if isinstance(cfg, dict):
             if cfg.get("hub") and cfg["hub"] not in ids:
                 cfg = {k: v for k, v in cfg.items() if k != "hub"}
-            devices[key] = {**devices.get(key, {}), **cfg}
+            merged = {**devices.get(key, {}), **{k: v for k, v in cfg.items() if k not in TEXT_KEYS}}
+            skipped += _import_text(merged, cfg)
+            devices[key] = merged
     opts[CONF_DEVICES] = devices
     for field in (CONF_IGNORED, "dismissed_hubs"):
         merged = list(dict.fromkeys([*([] if replace else opts.get(field, [])), *(data.get(field) or [])]))
         opts[field] = merged
     await _save(hass, entry, coord, opts)
-    return {"hubs": len(opts[CONF_HUBS]), "devices": len(devices)}
+    result = {"hubs": len(opts[CONF_HUBS]), "devices": len(devices)}
+    if skipped:
+        _LOGGER.warning("NetOrbit: the import left out %d Managed by or field values that were not valid", skipped)
+        result["skipped"] = skipped
+    return result
 
 
 async def track(hass, entry, coord, mac: str | None = None, ip: str | None = None, **fields: Any) -> dict[str, Any]:

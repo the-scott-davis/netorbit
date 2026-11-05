@@ -1041,7 +1041,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 source="hub", hub_type=hub.get("type", HUB_OTHER), hub_source=hub.get("source", "manual"),
                 ip_changes=rec.get("ip_changes", 0),
                 vendor=own.get("vendor"),
-                managed_by=hub.get("managed_by"), fields=dict(hub.get("fields") or {}),
+                **manage.stored_text(hub),
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
@@ -1069,7 +1069,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 hostname=rec.get("hostname"), fqdn=rec.get("fqdn"),
                 source="manual" if key in devices else "discovered",
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
-                managed_by=cfg.get("managed_by"), fields=dict(cfg.get("fields") or {}),
+                **manage.stored_text(cfg),
             )
 
         # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,

@@ -201,7 +201,7 @@ Most homes hand out addresses with DHCP, so a device's IP can change at any time
 - **Hubs follow their MAC too.** If an access point gets a new IP, NetOrbit notices on the next sweep and updates it.
 - **Devices added by IP switch to their MAC** as soon as NetOrbit sees them on the network, so they survive the next DHCP change as well.
 - **Renaming works either way.** Rename from the card (Edit layout, tap a device), in NetOrbit's settings, from an AI assistant, or in Home Assistant's own entity settings; the map uses the newest name you set. The one exception is a name typed into Home Assistant's entity settings, which wins over NetOrbit's name until you clear it there (renaming from the card changes it for you).
-- **Back up your setup.** `netorbit.export_config` returns every name, icon, hub and placement, keyed by MAC. `netorbit.import_config` restores it (merging by default), for example after reinstalling.
+- **Back up your setup.** `netorbit.export_config` returns every name, icon, hub and placement, keyed by MAC. `netorbit.import_config` restores it (merging by default), for example after reinstalling. *Managed by* and extra fields in an import get the same checks as when you type them; any that fail are left out and counted as `skipped` in the response.
 
 Tips for the tidiest map:
 

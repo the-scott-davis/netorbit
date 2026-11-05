@@ -36,6 +36,17 @@ def test_set_fields_limits():
     assert cfg == {}
 
 
+def test_stored_text_leaves_out_what_is_not_text():
+    assert manage.stored_text({"managed_by": "ISP", "fields": {"Rack": "2"}}) == {"managed_by": "ISP", "fields": {"Rack": "2"}}
+    assert manage.stored_text({"managed_by": 5, "fields": "abc"}) == {"managed_by": None, "fields": {}}
+    assert manage.stored_text({"fields": {"Rack": 2, "Notes": "spare"}}) == {"managed_by": None, "fields": {"Notes": "spare"}}
+    # A broken saved value doesn't stop the next edit, which replaces it.
+    cfg = {"fields": "abc"}
+    manage.set_fields(cfg, None, {"Rack": "2"})
+    assert cfg == {"fields": {"Rack": "2"}}
+    assert manage.fields_to_text("abc") == ""
+
+
 def test_parse_fields_text_round_trip():
     text = "Location: Hall\nURL: https://192.0.2.1/admin\n\nEmpty:"
     fields = manage.parse_fields_text(text)
