@@ -907,6 +907,8 @@ function noVideoType() {
 // The whole map in SVG units. Zooming shows a part of it with the same aspect ratio, so the card keeps its size.
 const NO_VIEW = { x: -70, y: -40, w: 1140, h: 1090 };
 const NO_ZOOM_MAX = 5;
+// A node popup left alone this long closes by itself (unless it holds unsaved changes); see _popAway.
+const NO_POP_IDLE_MS = 120000;
 
 /** The view after a zoom or pan gesture. Pure; exported for tests.
  *  `view` is the view the gesture started from (null = the whole map), `anchor` the map point that was under the
@@ -951,7 +953,10 @@ class NetOrbitCard extends HTMLElement {
     this._hass = hass;
     // Never redraw under the user's finger. A zoom gesture whose end was never seen (a lost pointer event)
     // stops holding updates back after 15 s.
-    if (this._drag || this._popOpen || this._revealing) return;
+    // The details popup only shows things, so the map keeps updating under it and each redraw opens it again from
+    // the new data (_reopenDetails). Every other popup holds updates until it closes, and so does a press inside
+    // the details popup, so a redraw never replaces the button under a finger.
+    if (this._drag || this._revealing || (this._popOpen && (!this._liveDetails || this._popPressed))) return;
     // _held is set only here: a drag, an open popup or a reveal redraws by itself when it finishes (a drop moves the device or clears _sig, closing the popup redraws).
     if (this._zooming && Date.now() - this._zooming < 15000) { this._held = true; return; }
     this._held = false;
@@ -974,7 +979,9 @@ class NetOrbitCard extends HTMLElement {
     const reveal = this._mode === "takeover" && !!model.root;
     this._mode = mode;
     if (reveal) this._view = null;
+    const live = this._popOpen ? this._detailsState() : null;
     this._render(model, reveal ? "reveal" : mode);
+    if (live) this._reopenDetails(live);
     if (reveal) this._playReveal();
   }
 
@@ -1747,6 +1754,7 @@ class NetOrbitCard extends HTMLElement {
       if (y + h > r.height) y -= h + 20;
       el.style.left = Math.max(4, x) + "px"; el.style.top = Math.max(4, y) + "px";
     };
+    this._detailsCtx = { wrap, place, hubs, all, col };
     const toSvg = (ev) => {
       const pt = svg.createSVGPoint();
       pt.x = ev.clientX; pt.y = ev.clientY;
@@ -2037,6 +2045,7 @@ class NetOrbitCard extends HTMLElement {
   }
 
   _openPop(html, ev, wrap, place, w = 250, h = 200) {
+    this._liveDetails = null; // set again by _detailsPopup
     // Swap a popup that is already open for this one without redrawing the map. _closePop
     // redraws, which replaces the shadow DOM: the new popup would then be appended to the old,
     // detached tree while _popOpen stays set, and the card would stop updating until a reload.
@@ -2050,6 +2059,7 @@ class NetOrbitCard extends HTMLElement {
     this._fitPop(pop, wrap);
     this._popOpen = true;
     pop.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => this._closePop(wrap)));
+    this._popAway(pop, wrap);
     return pop;
   }
 
@@ -2067,10 +2077,79 @@ class NetOrbitCard extends HTMLElement {
     pop.style.top = Math.max(4, top) + "px";
   }
 
-  _closePop(wrap) {
+  // The map doesn't update while a popup other than the details popup is open, so a popup must not stay open by
+  // accident (a wall panel).
+  // It closes on a tap outside it (a tap on another node opens that node's popup instead), on Escape, and after
+  // NO_POP_IDLE_MS without a touch. A form with changes not yet saved ignores outside taps and the idle timer:
+  // only Close, Escape or its own buttons end it. A popup that is no longer on the page (the card redrew under
+  // it) closes on any tap and on the timer, so the map never stays frozen behind it.
+  // `since`: when the popup was last touched, for the details popup opened again after a redraw, so redraws
+  // don't restart the idle timer.
+  _popAway(pop, wrap, since = 0) {
+    if (this._popOff) this._popOff();
+    let dirty = false;
+    let timer = null;
+    this._popLast = since || Date.now();
+    const keep = () => pop.isConnected && dirty;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (!keep()) this._closePop(wrap); }, Math.max(0, NO_POP_IDLE_MS - (Date.now() - this._popLast)));
+    };
+    const idle = () => { this._popLast = Date.now(); arm(); };
+    // On the click, not the pointerdown: closing redraws the card, and a redraw between pointerdown and click
+    // would replace the button under the finger and lose the tap (Share, Edit, the zoom buttons). The redraw
+    // also waits until that click has been handled; see _closePop.
+    const outside = (ev) => {
+      const path = ev.composedPath ? ev.composedPath() : [];
+      if (pop.isConnected && path.includes(pop)) return;
+      if (keep() || path.some((el) => el && el.classList && el.classList.contains("node"))) return;
+      this._closePop(wrap, true);
+    };
+    const esc = (ev) => { if (ev.key === "Escape") this._closePop(wrap); };
+    const changed = () => { dirty = true; idle(); };
+    // A press inside holds redraws (set hass) until its click has been handled; then the update that waited
+    // goes through.
+    const press = () => { this._popPressed = true; idle(); };
+    const release = () => {
+      if (!this._popPressed) return;
+      setTimeout(() => {
+        this._popPressed = false;
+        if (this._popOpen && this._liveDetails && this._hass) this.hass = this._hass;
+      }, 0);
+    };
+    const off = () => {
+      clearTimeout(timer);
+      document.removeEventListener("click", outside, true);
+      document.removeEventListener("keydown", esc, true);
+      document.removeEventListener("pointerup", release, true);
+      document.removeEventListener("pointercancel", release, true);
+      this._popPressed = false;
+      if (this._popOff === off) this._popOff = null;
+    };
+    document.addEventListener("click", outside, true);
+    document.addEventListener("keydown", esc, true);
+    document.addEventListener("pointerup", release, true);
+    document.addEventListener("pointercancel", release, true);
+    pop.addEventListener("pointerdown", press);
+    pop.addEventListener("keydown", idle);
+    pop.addEventListener("input", changed);
+    pop.addEventListener("change", changed);
+    this._popOff = off;
+    if (since) arm();
+    else idle();
+  }
+
+  // `later`: redraw after the current event has been handled, and not at all if it opened another popup.
+  _closePop(wrap, later = false) {
+    if (this._popOff) this._popOff();
+    this._liveDetails = null;
     const old = wrap.querySelector(".pop");
     if (old) old.remove();
-    if (this._popOpen) { this._popOpen = false; this._sig = ""; this.hass = this._hass; }
+    if (!this._popOpen) return;
+    this._popOpen = false;
+    this._sig = "";
+    if (later) setTimeout(() => { if (!this._popOpen) this.hass = this._hass; }, 0);
+    else this.hass = this._hass;
   }
 
   _hubOptions(hubs, current) {
@@ -2240,7 +2319,8 @@ class NetOrbitCard extends HTMLElement {
   }
 
   // Everything NetOrbit knows about a hub or device, and (for admins) its name and free text to edit.
-  _detailsPopup(n, ev, wrap, place, hubs, all, col) {
+  // `keep`: the state of the same popup before a redraw (see _detailsState), to open it again where it was.
+  _detailsPopup(n, ev, wrap, place, hubs, all, col, keep = null) {
     const admin = this._isAdmin();
     const dns = n.fqdn || n.hostname;
     const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
@@ -2261,6 +2341,13 @@ class NetOrbitCard extends HTMLElement {
       `<div class="row">${admin ? `<button class="go ed">Edit</button>` : ""}${n.entity ? `<button class="info">More info</button>` : ""}<button class="x">Close</button></div>`;
     const pop = this._openPop(html, ev, wrap, place, 320, 360);
     pop.classList.add("det");
+    this._liveDetails = { key: n.key, ev };
+    if (keep) {
+      if (keep.left) pop.style.left = keep.left;
+      if (keep.top) pop.style.top = keep.top;
+      pop.scrollTop = keep.scroll || 0;
+      this._popAway(pop, wrap, keep.touched);
+    }
     const q = (s) => pop.querySelector(s);
     if (q(".info")) q(".info").addEventListener("click", () => {
       this._closePop(wrap);
@@ -2277,6 +2364,31 @@ class NetOrbitCard extends HTMLElement {
     if (q(".ed")) q(".ed").addEventListener("click", () => this._detailsEdit(n, ev, wrap, place, hubs, all, col));
   }
 
+  // What a redraw needs to open the details popup again: which node, where the popup was, how far it was scrolled
+  // and when it was last touched.
+  _detailsState() {
+    if (!this._liveDetails) return null;
+    const c = this._detailsCtx;
+    const pop = c && c.wrap.querySelector(".pop");
+    return {
+      key: this._liveDetails.key, ev: this._liveDetails.ev, touched: this._popLast,
+      left: pop ? pop.style.left : "", top: pop ? pop.style.top : "", scroll: pop ? pop.scrollTop : 0,
+    };
+  }
+
+  // After a redraw, the details popup again from the new data. A node no longer on the map closes it.
+  _reopenDetails(s) {
+    const c = this._detailsCtx;
+    const n = c && c.wrap.isConnected && c.all[s.key];
+    if (!n) {
+      if (this._popOff) this._popOff();
+      this._popOpen = false;
+      this._liveDetails = null;
+      return;
+    }
+    this._detailsPopup(n, s.ev, c.wrap, c.place, c.hubs, c.all, c.col, s);
+  }
+
   _detailsEdit(n, ev, wrap, place, hubs, all, col) {
     const text = Object.entries(n.fields || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
     const pop = this._openPop(
@@ -2290,7 +2402,11 @@ class NetOrbitCard extends HTMLElement {
     );
     pop.classList.add("det");
     const q = (s) => pop.querySelector(s);
-    q(".back").addEventListener("click", () => this._detailsPopup(n, ev, wrap, place, hubs, all, col));
+    q(".back").addEventListener("click", () => {
+      this._detailsPopup(n, ev, wrap, place, hubs, all, col);
+      // Catch up on updates held while the form was open; the redraw opens the details again from them.
+      if (this._hass) this.hass = this._hass;
+    });
     q(".save").addEventListener("click", () => {
       let fields;
       try { fields = noParseFields(q(".fx").value); } catch (e) { q(".err").textContent = e.message; return; }
