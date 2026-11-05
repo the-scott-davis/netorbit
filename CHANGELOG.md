@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A lookup by IP finds the device that has the address now.** When DHCP gives a departed device's address to another device, services and assistant tools given that address no longer act on the departed one, and its sensor no longer shows the address (follow-up to #47).
+
 ## 0.3.0
 
 ### Added

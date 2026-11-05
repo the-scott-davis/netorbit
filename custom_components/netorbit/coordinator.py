@@ -418,6 +418,14 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 rec["ip"] = ip
                 if ip in replied:
                     rec["last_seen"] = now.isoformat()
+            # An address ARP now shows on another MAC is no longer this device's. The ping round
+            # already credits a reply only to the MAC that answered, but the departed record kept
+            # the address, so a lookup by IP (services, assistant tools) found it first.
+            owner = {ip: mac for mac, ip in mac_ip.items()}
+            for key, rec in self._seen.items():
+                rec_ip, rec_mac = rec.get("ip"), rec.get("mac")
+                if rec_ip and rec_mac and not key.startswith("hub:") and owner.get(rec_ip, rec_mac) != rec_mac:
+                    rec.pop("ip", None)
             if changed:
                 self._commit(opts)
 
