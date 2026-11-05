@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 // Minimal browser stand-ins so the card file can load under Node.
 globalThis.HTMLElement = class {};
-globalThis.customElements = { get: () => undefined, define: () => {} };
+globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
 const { netorbitLayout, noPrivateMac } = require("../custom_components/netorbit/frontend/netorbit-card.js");
@@ -307,6 +307,29 @@ test("with names shown, a name holding any form of address is replaced", () => {
     "2001:db8::1", "Cam_2001:db8::7", "fe80::", "::1", "2001:db8:0:0:0:0:0:1", // IPv6
   ];
   for (const n of leaky) assert.notStrictEqual(sharedLabel(n), n, n + " should be replaced");
+});
+
+test("sensors gone unavailable after a map was drawn: the map stays, with a note", () => {
+  const st = (id, attrs, state = "online") => ({ entity_id: id, state, attributes: Object.assign({ netorbit: true }, attrs) });
+  const up = [
+    st("sensor.sum", { kind: "summary", config_entry_id: "E1" }, "1"),
+    st("sensor.r", { kind: "hub", node_key: "hub:gateway", label: "Router", hub_type: "router" }),
+    st("sensor.pc", { kind: "device", node_key: "00:00:5e:00:53:10", mac: "00:00:5E:00:53:10", link: "hub:gateway", label: "PC" }),
+  ];
+  const card = new globalThis.NetOrbitCard();
+  card.shadowRoot = {};
+  let drawn = 0;
+  let notes = 0;
+  card._render = (m) => { drawn++; card._model_ = m; };
+  card._showOffline = () => notes++;
+  card.setConfig({});
+  const hass = (list) => ({ states: Object.fromEntries(list.map((s) => [s.entity_id, s])), entities: {}, user: { is_admin: true } });
+  card.hass = hass(up);
+  assert.strictEqual(drawn, 1);
+  card.hass = hass(up.map((s) => ({ entity_id: s.entity_id, state: "unavailable", attributes: {} })));
+  assert.deepStrictEqual([drawn, notes], [1, 1], "no redraw to 'No NetOrbit sensors found', a note instead");
+  card.hass = hass(up);
+  assert.strictEqual(drawn, 2, "the first update with data draws the map again");
 });
 
 test("with names shown, ordinary names stay", () => {

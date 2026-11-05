@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **One failed refresh no longer blanks the map.** A refresh that hits a network error (a moment without a route, a busy socket) keeps the last map for up to two refreshes in a row; only the third makes the sensors unavailable. When the sensors do go unavailable, the card keeps the last map with a note saying when NetOrbit last sent an update, instead of "No NetOrbit sensors found".
+
 ## 0.3.0
 
 ### Added

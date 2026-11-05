@@ -932,6 +932,11 @@ class NetOrbitCard extends HTMLElement {
     if (this._zooming && Date.now() - this._zooming < 15000) { this._held = true; return; }
     this._held = false;
     const model = this._model();
+    // The sensors went unavailable (updates failed several times in a row, the integration is reloading, Home
+    // Assistant is starting): keep the last map on screen and say so, rather than "No NetOrbit sensors found".
+    // The next update with data redraws everything, which drops the note.
+    if (!model.root && this._model_ && this._mode !== "takeover") { this._sig = ""; this._showOffline(); return; }
+    if (model.root) this._lastGood = Date.now();
     const mode = netorbitScanMode(model.summary && model.summary.attributes);
     if (mode === "takeover") {
       const t = this._takeoverModel(model);
@@ -1130,6 +1135,7 @@ class NetOrbitCard extends HTMLElement {
   .editbtn.on { background:#2563eb; border-color:#2563eb; color:#fff; }
   .editbtn ha-icon { --mdc-icon-size:16px; }
   .banner { margin:6px 18px 0; padding:8px 12px; border-radius:8px; background:rgba(37,99,235,.15); border:1px solid rgba(96,165,250,.35); font-size:13px; color:#dbeafe; }
+  .banner.offline { background:rgba(251,191,36,.12); border-color:rgba(251,191,36,.45); color:#fde68a; }
   .wrap { position:relative; }
   svg { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); width:100%; height:auto; display:block; max-height:${noHeight(cfg.height)}; user-select:none; -webkit-user-select:none; }
   .ring { fill:none; stroke:rgba(148,163,184,.07); stroke-width:1; }
@@ -2030,6 +2036,19 @@ class NetOrbitCard extends HTMLElement {
     const old = wrap.querySelector(".pop");
     if (old) old.remove();
     if (this._popOpen) { this._popOpen = false; this._sig = ""; this.hass = this._hass; }
+  }
+
+  // A note under the header while NetOrbit's sensors are unavailable.
+  _showOffline() {
+    const card = this.shadowRoot.querySelector("ha-card");
+    const head = card && card.querySelector(".head");
+    if (!head || card.querySelector(".banner.offline")) return;
+    const since = this._lastGood ? new Date(this._lastGood).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const note = document.createElement("div");
+    note.className = "banner offline";
+    note.setAttribute("role", "status");
+    note.textContent = `NetOrbit hasn't sent an update${since ? ` since ${since}` : ""}. This is the last map it sent; it updates again when NetOrbit is back.`;
+    head.after(note);
   }
 
   _hubOptions(hubs, current) {
