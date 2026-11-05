@@ -127,7 +127,7 @@ NetOrbit needs Home Assistant 2026.2 or newer.
 3. Set it up when asked, or go to **Settings > Devices & services > Add integration > NetOrbit**. The subnet and router are filled in for you. No restart is needed for a first install.
 4. Refresh your browser once so the card loads, then [add the map to a dashboard](#add-the-map-to-a-dashboard).
 
-Updates show up in **Settings > Updates** like any other. Updating still needs a restart. To try a pre-release, turn on pre-releases for NetOrbit in the Marketplace.
+Updates show up in **Settings > Updates** like any other. Updating still needs a restart.
 
 ### HACS (Home Assistant 2026.10 and older)
 
