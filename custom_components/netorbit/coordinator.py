@@ -78,6 +78,7 @@ from .logic import (
     guess_icon,
     guess_icon_from,
     is_random_mac,
+    keys_answering,
     normalize_mac,
     parse_proc_arp,
     rollup_status,
@@ -839,7 +840,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         gateway_mac = hub_macs.get(ROOT_HUB_ID)
         device_macs = {k: r["mac"] for k, r in self._seen.items() if r.get("mac") and not k.startswith("hub:")}
         leaf = {h["id"] for h in self.opts[CONF_HUBS] if h.get("type") in (HUB_AP, HUB_MESH, HUB_OTHER) and h["id"] not in self._tables}
-        self._topology = infer(self._tables, hub_macs, gateway_mac, device_macs, ROOT_HUB_ID, leaf_hubs=leaf)
+        # Parents a person has locked tell infer() which of several hubs sharing a switch port is the uplink.
+        locked = {h["id"]: h["parent"] for h in self.opts[CONF_HUBS] if h.get("parent_locked") and h.get("parent") and h["parent"] != h["id"]}
+        self._topology = infer(self._tables, hub_macs, gateway_mac, device_macs, ROOT_HUB_ID, leaf_hubs=leaf, hub_parents=locked)
         stamp = now.isoformat()
         for key, hub_id in self._topology.device_hub.items():
             self._seen[key]["auto"] = {"hub": hub_id, "source": PLACE_SNMP, "at": stamp}
@@ -885,10 +888,26 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             list(by_ip), count=PING_COUNT, interval=0.3, timeout=PING_TIMEOUT,
             concurrent_tasks=64, privileged=self._privileged,
         )
+        # The pings just refreshed ARP, so it names the MAC behind each reply. A device whose
+        # old address now belongs to someone else stays offline instead of borrowing their reply.
+        arp = await self.hass.async_add_executor_job(_read_arp)
+        hub_macs = self._hub_macs()
+        macs: dict[str, str] = {}
+        for key, ip in targets.items():
+            mac = normalize_mac(hub_macs.get(key.removeprefix("hub:")) if key.startswith("hub:") else (self._seen.get(key) or {}).get("mac"))
+            if not mac:
+                continue
+            # Only hold a key to its MAC once ARP has shown that MAC at this address. A hub given its
+            # base MAC, or a MAC entered by hand for a device behind a MAC-NAT repeater, never shows
+            # up there, and must not be kept offline for it.
+            if arp.get(ip) == mac:
+                self._seen.setdefault(key, {"first_seen": dt_util.utcnow().isoformat()})["arp_ip"] = ip
+            if (self._seen.get(key) or {}).get("arp_ip") == ip:
+                macs[key] = mac
         alive: list[tuple[str, str | None]] = []
         for host in results:
             if host.is_alive:
-                for key in by_ip.get(host.address, []):
+                for key in keys_answering(by_ip.get(host.address, []), macs, arp.get(host.address)):
                     alive.append((key, host.address))
         return alive
 
