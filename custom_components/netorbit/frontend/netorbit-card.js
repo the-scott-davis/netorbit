@@ -2281,7 +2281,7 @@ class NetOrbitCard extends HTMLElement {
     const text = Object.entries(n.fields || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
     const pop = this._openPop(
       `<b>Edit ${noEsc(n.label)}</b>` +
-      `<label>Name<input class="name" value="${noEsc(n.label)}"></label>` +
+      `<label>Name<input class="name" ${n.kind === "device" ? `maxlength="${NO_NAME_MAX}" placeholder="Automatic name" ` : ""}value="${noEsc(n.label)}"></label>` +
       `<label>Managed by<input class="mb" value="${noEsc(n.managed_by || "")}" placeholder="A link, or the name of a hub or device on the map"></label>` +
       `<label>Extra fields, one per line as Label: value<textarea class="fx" rows="4" placeholder="Location: Garage&#10;Serial: ABC123">${noEsc(text)}</textarea></label>` +
       `<div class="err"></div>` +
@@ -2296,11 +2296,17 @@ class NetOrbitCard extends HTMLElement {
       try { fields = noParseFields(q(".fx").value); } catch (e) { q(".err").textContent = e.message; return; }
       // The box shows every field, so what is missing now has been removed.
       const data = { managed_by: q(".mb").value.trim(), fields: Object.assign(Object.fromEntries(Object.keys(n.fields || {}).map((k) => [k, null])), fields) };
-      const name = q(".name").value.trim();
-      if (name && name !== n.label) data.name = name;
-      if (n.kind === "hub") data.hub = n.key.replace(/^hub:/, ""); else data.device = this._ref(n);
+      const name = q(".name").value.trim().slice(0, NO_NAME_MAX);
+      const renamed = name !== String(n.label || "").trim().slice(0, NO_NAME_MAX);
+      if (n.kind === "hub") {
+        data.hub = n.key.replace(/^hub:/, "");
+        if (name && name !== n.label) data.name = name;
+      } else data.device = this._ref(n);
       this._closePop(wrap);
-      this._call(n.kind === "hub" ? "update_hub" : "update_device", data);
+      const saved = this._call(n.kind === "hub" ? "update_hub" : "update_device", data);
+      // A device is renamed the same way as from its menu in Edit layout: an empty name goes back to the automatic
+      // one, and a name set in Home Assistant's entity settings (it wins on the map) changes too.
+      if (n.kind === "device" && renamed) saved.then((ok) => ok && this._rename(n, name));
     });
   }
 

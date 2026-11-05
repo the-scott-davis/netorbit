@@ -1119,6 +1119,29 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.strictEqual((await ws()).length, wsBefore, "no entity rename when NetOrbit's own save failed");
     console.log("rename errors ok");
 
+    // The details popup outside Edit layout renames a device the same way, after saving its fields.
+    await rp.evaluate(() => { window.callFail = null; });
+    await c8.locator(".editbtn").click();
+    const wsNow = (await ws()).length;
+    await open();
+    await c8.locator(".pop .ed").click();
+    await c8.locator(".pop input.name").fill("Lounge TV");
+    await c8.locator(".pop .save").click();
+    await rp.waitForFunction((n) => window.wsCalls.length === n + 1, wsNow);
+    const sent = (await calls()).slice(-2);
+    assert.deepStrictEqual(sent.map((c) => c[1]), ["update_device", "track_device"], "details Edit saves the fields, then renames");
+    assert.strictEqual(sent[1][2].name, "Lounge TV", "NetOrbit's own name is saved");
+    assert.strictEqual((await ws()).at(-1).name, "Lounge TV", "the name set in Home Assistant follows");
+    await shows("Lounge TV");
+    const untouched = (await calls()).length;
+    await open();
+    await c8.locator(".pop .ed").click();
+    await c8.locator(".pop .save").click();
+    assert.strictEqual((await calls()).length, untouched + 1, "an untouched name sends only the fields");
+    assert.strictEqual((await calls()).at(-1)[1], "update_device");
+    await c8.locator(".editbtn").click();
+    console.log("details rename ok");
+
     // On a phone the menu, with its Name field, fits on the map.
     const rph = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     await rph.goto(BASE + "/scripts/preview/index.html?s=novice");
