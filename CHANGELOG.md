@@ -15,6 +15,9 @@
 - **The assistant tool that undoes hand placement** (`netorbit_reset_placement`) is now marked destructive, since those placements can only be set again by hand (thanks @xlntech1, #52).
 - **Saved videos start right away** and end without the long pause at the start and end (#29).
 
+### Known issues
+- **Devices that left before you upgraded may show online.** Devices that left the network before you upgraded, and whose address has since gone to another device, may show online. Remove or ignore them. Anything that leaves from now on is detected (thanks @ninchistudios, #65).
+
 ## 0.2.10
 
 ### Fixed
