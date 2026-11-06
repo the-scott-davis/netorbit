@@ -45,14 +45,39 @@ def _all_devices(reg: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
     return entries
 
 
+def _tracker_only_devices(hass: HomeAssistant) -> set[str]:
+    """Ids of devices that hold nothing but device trackers.
+
+    From Home Assistant 2026.11 every network-scanner tracker (UniFi, Nmap and other
+    router integrations) gets a device of its own, named by that integration after an
+    alias, a hostname or the maker plus part of the MAC, and most of these trackers start
+    turned off. Such a device says nothing about what the client is, so it must not make
+    a client look like network gear or outrank the name NetOrbit found for it.
+    """
+    domains: dict[str, set[str]] = {}
+    for ent in er.async_get(hass).entities.values():
+        if ent.device_id:
+            domains.setdefault(ent.device_id, set()).add(ent.domain)
+    return {dev_id for dev_id, found in domains.items() if found == {"device_tracker"}}
+
+
 def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
     """Every device in Home Assistant that has a MAC connection, keyed by MAC."""
     reg = dr.async_get(hass)
+    tracker_only = _tracker_only_devices(hass)
     out: dict[str, RegistryInfo] = {}
+    user_names: dict[str, str] = {}
     for dev in _all_devices(reg):
         macs = [normalize_mac(v) for k, v in dev.connections if k == dr.CONNECTION_NETWORK_MAC]
         macs = [m for m in macs if m]
         if not macs:
+            continue
+        if dev.id in tracker_only:
+            # Only a name the user gave the tracker's device counts, and only where no other
+            # device names the MAC. The tracker's own name still comes through
+            # `tracker_names_by_mac` while the tracker is on.
+            if name := useful_name(dev.name_by_user):
+                user_names.update((mac, name) for mac in macs)
             continue
         domain = None
         for entry_id in _entry_ids(dev):
@@ -79,6 +104,12 @@ def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
             elif old.name is None and info.name:
                 out[mac] = RegistryInfo(info.name, old.model or info.model,
                                         old.manufacturer or info.manufacturer, old.domain)
+    for mac, name in user_names.items():
+        old = out.get(mac)
+        if old is None:
+            out[mac] = RegistryInfo(name, None, None, None)
+        elif old.name is None:
+            out[mac] = RegistryInfo(name, old.model, old.manufacturer, old.domain)
     return out
 
 

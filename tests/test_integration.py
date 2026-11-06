@@ -449,6 +449,42 @@ async def test_names_from_other_integrations(hass: HomeAssistant, fake_net) -> N
     assert not any(":" in n and n.count(":") >= 5 for n in names)
 
 
+async def test_tracker_only_devices_are_not_gear(hass: HomeAssistant, fake_net) -> None:
+    """Home Assistant 2026.11 gives every router client's tracker a device of its own, mostly turned off.
+
+    Such a device must not make a client look like network gear, and its generated name must not
+    replace the name NetOrbit found. A name the user gave it still counts.
+    """
+    from homeassistant.helpers import device_registry as dr
+
+    MAC_D = "00:00:5e:00:53:0d"
+    fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12", "192.0.2.13"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.11": MAC_B, "192.0.2.12": MAC_C, "192.0.2.13": MAC_D}
+    fake_net.mdns["192.0.2.12"] = "Porch-Light.local."
+    dev_reg, ent_reg = dr.async_get(hass), er.async_get(hass)
+    router = MockConfigEntry(domain="unifi", title="Router")
+    scanner = MockConfigEntry(domain="nmap_tracker", title="Scanner")
+    router.add_to_hass(hass)
+    scanner.add_to_hass(hass)
+    # As 2026.11 leaves them: a client the router knows by an alias that reads like gear, one the
+    # scanner named after its maker and part of its MAC, and one the user renamed.
+    for owner, mac, name in ((router, MAC_B, "Hallway Switch"), (scanner, MAC_C, "Acme 00:53:0C"), (router, MAC_D, "esp-0d")):
+        dev = dev_reg.async_get_or_create(
+            config_entry_id=owner.entry_id, connections={(dr.CONNECTION_NETWORK_MAC, mac)}, name=name
+        )
+        ent_reg.async_get_or_create("device_tracker", owner.domain, mac, config_entry=owner, device_id=dev.id,
+                                    disabled_by=er.RegistryEntryDisabler.INTEGRATION)
+    dev_reg.async_update_device(dev.id, name_by_user="Garden Pump")
+
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    assert [h["name"] for h in entry.options["hubs"] if h["name"] == "Hallway Switch"] == []
+    assert entry.runtime_data._suggestions == []
+    nodes = _node_states(hass)
+    assert nodes["Device 53:0B"].attributes["kind"] == "device"
+    assert {"Porch Light", "Garden Pump"} <= set(nodes)
+
+
 async def test_old_installs_look_names_up_again(hass: HomeAssistant, fake_net) -> None:
     """A device checked recently by an older version gets looked up again by the new one."""
     fake_net.alive = {GATEWAY, "192.0.2.12"}

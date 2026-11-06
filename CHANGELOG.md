@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Home Assistant 2026.11: router clients no longer turn into hubs or lose their names.** From 2026.11, UniFi, Nmap and other router integrations give each client's tracker a device of its own, named after an alias, a hostname or the maker plus part of the MAC. NetOrbit no longer takes such a device for network gear (a client called "Hallway Switch" was added as a switch) or lets its name replace the one NetOrbit found; a name you give the device yourself still counts. These integrations also add new client trackers turned off now, and NetOrbit reads names and access points only from trackers that are on.
+
 ## 0.3.1
 
 ### Changed
