@@ -16,7 +16,7 @@
 - **Saved videos start right away** and end without the long pause at the start and end (#29).
 
 ### Known issues
-- **Devices that left before you upgraded may show online.** Devices that left the network before you upgraded, and whose address has since gone to another device, may show online. Remove or ignore them. Anything that leaves from now on is detected (thanks @ninchistudios, #65).
+- **Devices that left before you upgraded may show online.** If a device left before 0.3.0 and its address has since gone to another device, it can stay online, because the #47 check needs an address saved by 0.3.0. To clear it, open the device under the integration's Configure menu and choose "Stop tracking and ignore this device", or call `netorbit.ignore_device`. This happens only once: devices that leave from now on go offline as #47 describes (thanks @ninchistudios, #65).
 
 ## 0.2.10
 
