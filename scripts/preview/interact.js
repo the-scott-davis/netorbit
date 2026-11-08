@@ -1209,9 +1209,14 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.strictEqual(await bp.evaluate(() => (window.calls || []).length), 0, "a long-press opens nothing");
     await press("Shed Switch");
     assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch");
-    // The tap straight after a long-press is a real tap: it opens the device, not swallowed by the press before it.
+    // The tap straight after a long-press is a real tap: it opens the device's details (and More info there opens the
+    // device), not swallowed by the press before it.
     await bp.evaluate(() => { window.moreInfo = null; document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)); });
     await cb.locator(`.node[data-key="${await key("Shed Pi")}"] circle.disc`).click();
+    const shedInfo = cb.locator(".pop .info");
+    await shedInfo.waitFor({ timeout: 3000 }).catch(() => {});
+    assert.ok(await shedInfo.count(), "a tap right after a long-press opens the device's details");
+    await shedInfo.click();
     assert.ok(await bp.evaluate(() => window.moreInfo), "a tap right after a long-press opens the device");
     // Long-press the grey hub to go up a level; the row under the header goes back to the whole map.
     await press("Rack Switch");
