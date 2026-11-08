@@ -7,3 +7,8 @@ scripts/preview/mdi.js
 .DS_Store
 scripts/preview/_simstates/
 scripts/preview/_video/
+
+# Local Claude Code settings and notes. Never commit these.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
