@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, netorbitBalloonLayout, netorbitFocus, netorbitDraw, noPrivateMac } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, netorbitBalloonLayout, netorbitFocus, netorbitNodeMap, netorbitDraw, noPrivateMac } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -145,6 +145,19 @@ test("balloon: unknown parents, loops, a big access point and a bare router all 
   for (let i = 1; i < big.length; i++) assert.ok(dist(big[i], big[i - 1]) > 30);
   const bare = netorbitBalloonLayout(model([["r", null]], {}));
   assert.ok(bare.pos.r && bare.view.w > 0);
+});
+
+test("the details popup reads a node from the whole map, not the grey up hub of a branch", () => {
+  const m = chain();
+  m.internet = { key: "internet", status: "online" };
+  const branch = netorbitFocus(m, "s2");
+  assert.strictEqual(branch.hubs.s1.kind, "uphub");
+  // The whole map's copy of s1 is still a hub under r, not the up hub under s2 that a branch shows.
+  const all = netorbitNodeMap(m);
+  assert.notStrictEqual(all.s1.kind, "uphub", "s1 is not the grey up hub on the whole map");
+  assert.strictEqual(all.s1.parent, "r", "its parent is the router, not the branch's middle hub");
+  assert.strictEqual(all.internet, m.internet);
+  assert.strictEqual(all.s2.key, "s2");
 });
 
 test("balloon: drawn labels run out from the device's own hub", () => {

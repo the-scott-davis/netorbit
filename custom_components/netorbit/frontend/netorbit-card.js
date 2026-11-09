@@ -466,6 +466,16 @@ function netorbitFocus(model, key) {
   return Object.assign({}, model, { hubs: sub, root: key, devices: devices.filter((d) => keep.has(d.link)), internet: null, focus: key, path, up });
 }
 
+/** Every hub, device and the internet node of a model by key, as the whole map draws them. Pass the whole map (not a
+ * branch on show): in a branch, the hub above it is a grey "up" copy with another kind and parent. Pure; exported for tests. */
+function netorbitNodeMap(model) {
+  const all = {};
+  Object.values(model.hubs || {}).forEach((h) => (all[h.key] = h));
+  (model.devices || []).forEach((d) => (all[d.key] = d));
+  if (model.internet) all.internet = model.internet;
+  return all;
+}
+
 const NO_PLACEMENT = {
   manual: "You placed it",
   controller: "Reported by your Wi-Fi system",
@@ -2816,14 +2826,18 @@ class NetOrbitCard extends HTMLElement {
   // After a redraw, the details popup again from the new data. A node no longer on the map closes it.
   _reopenDetails(s) {
     const c = this._detailsCtx;
-    const n = c && c.wrap.isConnected && c.all[s.key];
+    // Read the node from the whole map: while a branch is on show, its hub above is a grey "up" copy that would
+    // be labelled a Device with the wrong parent.
+    const full = this._full;
+    const all = c && full ? netorbitNodeMap(full) : (c && c.all);
+    const n = c && c.wrap.isConnected && all[s.key];
     if (!n) {
       if (this._popOff) this._popOff();
       this._popOpen = false;
       this._liveDetails = null;
       return;
     }
-    this._detailsPopup(n, s.ev, c.wrap, c.place, c.hubs, c.all, c.col, s);
+    this._detailsPopup(n, s.ev, c.wrap, c.place, full ? full.hubs : c.hubs, all, c.col, s);
   }
 
   _detailsEdit(n, ev, wrap, place, hubs, all, col) {
@@ -2891,5 +2905,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { NetOrbitCard, noLayoutKey, netorbitLayout, netorbitBalloonLayout, netorbitFocus, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields };
+if (typeof module !== "undefined") module.exports = { NetOrbitCard, noLayoutKey, netorbitLayout, netorbitBalloonLayout, netorbitFocus, netorbitNodeMap, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");
