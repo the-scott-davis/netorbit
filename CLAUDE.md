@@ -8,7 +8,7 @@ NetOrbit is a Home Assistant custom integration and Lovelace card that draws a l
 
 These rules apply to every change, every command and every file. They are not optional.
 
-- **Never put a secret anywhere it can be saved.** That covers passwords, tokens, API keys, SNMP communities from a real network, and Home Assistant long-lived access tokens. Keep them out of code, tests, docs, commit messages, PR text and shell commands. If a command needs a secret, read it from an environment variable the user sets themselves (for example `HA_TOKEN`), never type the value into the command.
+- **Never put a secret anywhere it can be saved.** That covers passwords, tokens, API keys, SNMP communities from a real network, and Home Assistant long-lived access tokens. Keep them out of code, tests, docs, commit messages, PR text and shell commands. If a command needs a secret, read it from an environment variable the user sets themselves (for example `HA_TOKEN`). Never type the value into the command, print or echo it, or write it to a file in the repo such as `.env`.
 - **Don't save approvals that contain secrets.** Claude Code stores "don't ask again" approvals in `.claude/settings.local.json`, word for word. That file and the rest of `.claude/` are ignored here and must stay that way. Never commit anything under `.claude/`, and never write an allow rule that contains a credential.
 - **No real network data.** Examples, tests, fixtures, screenshots and docs use only the ranges reserved for documentation: IPv4 `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, and MACs `00:00:5e:00:53:xx`. Hostnames, device names, SSIDs and SNMP communities are made up. `python scripts/check_examples.py` enforces the address part and CI runs it. A value that has to fall outside those ranges needs an `example-ok` comment on its line saying why.
 - **Diagnostics stay redacted.** `diagnostics.py` replaces addresses and names with placeholders so users can attach the download to an issue. Any new field that could hold an address, name or credential must be redacted too, and the simulator tests check this.
@@ -26,7 +26,7 @@ python3.13 -m venv .venv && . .venv/bin/activate
 pip install -r requirements_test.txt
 ```
 
-The AI tool tests also need the packages Home Assistant pins for its conversation component. CI installs them like this, and you can run the same line locally:
+The AI tool tests (`tests/test_auto_and_tools.py`) also need the packages Home Assistant pins for its conversation component, and may fail locally without them. CI installs them like this, and you can run the same line locally:
 
 ```bash
 pip install $(python -c "import json, pathlib, importlib.util; root = pathlib.Path(importlib.util.find_spec('homeassistant').origin).parent; print(' '.join(json.loads((root / 'components' / 'conversation' / 'manifest.json').read_text())['requirements']))")
@@ -41,16 +41,16 @@ python scripts/check_examples.py
 ```
 
 - `pytest -k simulation` runs the network simulator, which builds hundreds of made-up networks and checks discovery and placement against the known layout. Run it when you touch how devices are found or placed. `pytest -s -k simulation` prints a report.
-- To preview the card with fake data: `npm i @mdi/js@7.4.47`, copy `node_modules/@mdi/js/mdi.js` to `scripts/preview/`, serve the repo root with `python -m http.server 8766`, and open `http://localhost:8766/scripts/preview/index.html?s=full` (or `mesh`, `flat`, `novice`). `node scripts/preview/interact.js` drives edit mode in a real browser with Playwright.
+- To preview the card with fake data: `npm i @mdi/js@7.4.47`, copy `node_modules/@mdi/js/mdi.js` to `scripts/preview/`, serve the repo root with `python -m http.server 8766`, and open `http://localhost:8766/scripts/preview/index.html?s=full` (or `mesh`, `flat`, `novice`). `node scripts/preview/interact.js` drives edit mode in a real browser with Playwright (install it first with `npm i playwright` and `npx playwright install chromium`).
 - The end-to-end test in a real Home Assistant container is described at the top of `scripts/ci/ha_e2e.py`. It needs Docker. CI runs it on every PR, so running it locally is optional.
 
-CI runs hacs, hassfest, the tests above, the browser tests in Chromium and WebKit, the examples check, the secret scan and the end-to-end test.
+The Validate workflow runs hacs, hassfest, the tests above, the assistant tools on a newer Home Assistant, the browser tests in Chromium and WebKit, the examples check and the secret scan. The E2E workflow runs the end-to-end test against the pinned Home Assistant and the current beta; the beta run may fail without blocking a merge.
 
 ## Layout
 
 - `custom_components/netorbit/` is the integration.
   - `logic.py`, `topology.py` and `detect.py` are pure Python with no Home Assistant imports. Keep them that way so they stay easy to test.
-  - `manage.py` is the one place that changes the map. Services, the options flow, the card and the AI tools all go through it.
+  - `manage.py` holds every edit to the map. Services, the options flow, the card and the AI tools all make their changes through its functions.
   - `actions.py` holds the higher level operations shared by services, the card and AI tools. `llm_api.py` exposes them as tools for AI assistants.
   - `coordinator.py` does discovery, hub detection, layout and status. `snmp.py`, `mdns.py` and `sources.py` gather the raw signals.
   - `frontend/netorbit-card.js` is the card, a single plain JavaScript file with no build step.
