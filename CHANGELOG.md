@@ -14,6 +14,7 @@
 - Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
 - **A popup left open no longer freezes the map.** The map didn't redraw while a popup was open, so one left open (on a wall panel, say) stopped all updates until someone closed it. The details popup now updates along with the map, and every popup closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
 - A tooltip shown on a map redrawn under the mouse now appears next to the pointer, not in the corner of the card (thanks @ninchistudios, #66).
+- **One failed refresh no longer blanks the map.** A refresh that hits a network error (a moment without a route, a busy socket) keeps the last map for up to two refreshes in a row; only the third makes the sensors unavailable. When the sensors do go unavailable, the card keeps the last map with a note saying when NetOrbit last sent an update, instead of "No NetOrbit sensors found".
 
 ## 0.3.1
 

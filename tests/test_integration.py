@@ -505,6 +505,40 @@ async def test_internet_check(hass: HomeAssistant, fake_net, freezer: FrozenDate
     assert len(down) == 2 and len(up) == 1
 
 
+async def test_a_failed_round_keeps_the_map(hass: HomeAssistant, fake_net) -> None:
+    """One or two rounds failing on a network error keep the last map; the third makes the sensors unavailable."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    coord = entry.runtime_data
+    summary_id = _summary(hass).entity_id
+    good = fake_net.multiping
+
+    async def broken(*args, **kwargs):
+        raise OSError("Network is unreachable")
+
+    fake_net.multiping = broken
+    for _ in range(2):
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(summary_id).state != "unavailable"
+        assert coord.last_update_success
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(summary_id).state == "unavailable"
+
+    # Back on its feet: the next good round counts from zero again.
+    fake_net.multiping = good
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(summary_id).state != "unavailable"
+    fake_net.multiping = broken
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(summary_id).state != "unavailable"
+
+
 async def test_internet_check_can_be_turned_off(hass: HomeAssistant, fake_net) -> None:
     fake_net.alive = {GATEWAY, "1.1.1.1"}
     pinged: list[str] = []
