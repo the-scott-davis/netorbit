@@ -185,9 +185,13 @@ def fallback_name(mac: str | None, ip: str | None) -> str:
     return "Device " + (ip or "unknown")
 
 
-def parse_proc_arp(text: str) -> dict[str, str]:
-    """Parse /proc/net/arp into {ip: mac} for complete entries."""
-    out: dict[str, str] = {}
+def parse_proc_arp_all(text: str) -> dict[str, list[str]]:
+    """Parse /proc/net/arp into {ip: [mac, ...]} for complete entries, in table order.
+
+    The kernel keeps one entry per interface, so a host with two interfaces on one subnet (or a
+    bridge beside its LAN adapter) can list an address under two MACs at once.
+    """
+    out: dict[str, list[str]] = {}
     for line in text.splitlines()[1:]:
         parts = line.split()
         if len(parts) < 4:
@@ -199,8 +203,16 @@ def parse_proc_arp(text: str) -> dict[str, str]:
             continue
         mac = normalize_mac(mac)
         if complete and mac:
-            out[ip] = mac
+            macs = out.setdefault(ip, [])
+            if mac in macs:
+                macs.remove(mac)
+            macs.append(mac)
     return out
+
+
+def parse_proc_arp(text: str) -> dict[str, str]:
+    """Parse /proc/net/arp into {ip: mac} for complete entries: the last MAC listed for each address."""
+    return {ip: macs[-1] for ip, macs in parse_proc_arp_all(text).items()}
 
 
 def keys_answering(keys: list[str], macs: dict[str, str], answered_by: str | None) -> list[str]:

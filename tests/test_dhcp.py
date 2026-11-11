@@ -104,6 +104,20 @@ async def test_lookup_by_ip_finds_the_device_that_has_it_now(hass: HomeAssistant
     assert nodes["Device 53:10"].attributes["ip"] is None
 
 
+async def test_device_keeps_its_ip_while_arp_still_lists_its_mac_there(hass: HomeAssistant, fake_net, freezer) -> None:
+    fake_net.alive = {GATEWAY, "192.0.2.10"}
+    fake_net.arp = {"192.0.2.10": TV}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+
+    # ARP now lists the address under two MACs at once (a bridge on a second interface, say), the
+    # other one last. The TV is still there, so it keeps its address.
+    fake_net.arp = {"192.0.2.10": NEW}
+    fake_net.arp_also = {"192.0.2.10": [TV]}
+    await advance(hass, freezer, 301)
+    assert _node_states(hass)["Device 53:10"].attributes["ip"] == "192.0.2.10"
+
+
 async def test_device_added_by_ip_switches_to_its_mac(hass: HomeAssistant, fake_net, freezer) -> None:
     fake_net.alive = {GATEWAY}
     fake_net.arp = {}
