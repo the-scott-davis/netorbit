@@ -788,6 +788,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if mac in dismissed or mac in ignored or self._is_hub_address(mac, rec.get("ip")):
                 continue
             reg = self._registry.get(mac)
+            if reg and reg.tracker_only:
+                reg = None
             snmp = rec.get("snmp") or {}
             ev = Evidence(
                 mac=mac, ip=rec.get("ip"), hostname=rec.get("hostname"), vendor=rec.get("vendor"),

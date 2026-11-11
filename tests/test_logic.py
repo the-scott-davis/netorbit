@@ -143,6 +143,16 @@ def test_useful_name_skips_addresses():
     assert ping_label("192.0.2.9") is None
 
 
+def test_tracker_label_skips_maker_plus_mac_end():
+    from custom_components.netorbit.logic import tracker_label
+
+    assert tracker_label("Hall Thermostat") == "Hall Thermostat"
+    assert tracker_label("Acme 00:53:0C") is None
+    assert tracker_label("00:53:0c") is None
+    assert tracker_label("00:00:5e:00:53:0c") is None
+    assert tracker_label("Office 12:30") == "Office 12:30"
+
+
 def test_label_helps_hub_detection():
     from custom_components.netorbit.detect import Evidence, classify
 

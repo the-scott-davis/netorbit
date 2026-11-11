@@ -14,6 +14,7 @@
 - Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
 - **A popup left open no longer freezes the map.** The map didn't redraw while a popup was open, so one left open (on a wall panel, say) stopped all updates until someone closed it. The details popup now updates along with the map, and every popup closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
 - A tooltip shown on a map redrawn under the mouse now appears next to the pointer, not in the corner of the card (thanks @ninchistudios, #66).
+- **Home Assistant 2026.11: router clients no longer turn into hubs or lose their names.** From 2026.11, UniFi, Nmap and other router integrations give each client's tracker a device of its own, named after an alias, a hostname or the maker plus part of the MAC. NetOrbit no longer takes such a device for network gear (a client called "Hallway Switch" was added as a switch) or lets its name replace the one NetOrbit found; a name you give the device yourself still counts, and its maker and model are kept. A tracker that is on no longer passes on a name made of a maker and the end of a MAC either (how Nmap names a client without a hostname, "Acme 00:53:0C"). These integrations also add new client trackers turned off now, and NetOrbit reads names and access points only from trackers that are on.
 
 ## 0.3.1
 
