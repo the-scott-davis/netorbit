@@ -449,13 +449,17 @@ async def test_names_from_other_integrations(hass: HomeAssistant, fake_net) -> N
     assert not any(":" in n and n.count(":") >= 5 for n in names)
 
 
-async def test_tracker_only_devices_are_not_gear(hass: HomeAssistant, fake_net) -> None:
+@pytest.mark.parametrize("tracker_on", [False, True])
+async def test_tracker_only_devices_are_not_gear(hass: HomeAssistant, fake_net, tracker_on: bool) -> None:
     """Home Assistant 2026.11 gives every router client's tracker a device of its own, mostly turned off.
 
     Such a device must not make a client look like network gear, and its generated name must not
-    replace the name NetOrbit found. A name the user gave it still counts.
+    replace the name NetOrbit found, whether the tracker is off or on. A name the user gave it
+    still counts, and its maker and model are kept.
     """
     from homeassistant.helpers import device_registry as dr
+
+    from custom_components.netorbit.sources import registry_by_mac
 
     MAC_D = "00:00:5e:00:53:0d"
     fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12", "192.0.2.13"}
@@ -468,21 +472,31 @@ async def test_tracker_only_devices_are_not_gear(hass: HomeAssistant, fake_net) 
     scanner.add_to_hass(hass)
     # As 2026.11 leaves them: a client the router knows by an alias that reads like gear, one the
     # scanner named after its maker and part of its MAC, and one the user renamed.
+    devices = {}
     for owner, mac, name in ((router, MAC_B, "Hallway Switch"), (scanner, MAC_C, "Acme 00:53:0C"), (router, MAC_D, "esp-0d")):
-        dev = dev_reg.async_get_or_create(
-            config_entry_id=owner.entry_id, connections={(dr.CONNECTION_NETWORK_MAC, mac)}, name=name
+        devices[mac] = dev_reg.async_get_or_create(
+            config_entry_id=owner.entry_id, connections={(dr.CONNECTION_NETWORK_MAC, mac)}, name=name,
+            manufacturer="Acme", model="Pump 2" if mac == MAC_D else None,
         )
-        ent_reg.async_get_or_create("device_tracker", owner.domain, mac, config_entry=owner, device_id=dev.id,
-                                    disabled_by=er.RegistryEntryDisabler.INTEGRATION)
-    dev_reg.async_update_device(dev.id, name_by_user="Garden Pump")
+        ent = ent_reg.async_get_or_create(
+            "device_tracker", owner.domain, mac, config_entry=owner, device_id=devices[mac].id,
+            disabled_by=None if tracker_on else er.RegistryEntryDisabler.INTEGRATION,
+        )
+        if tracker_on:
+            # The tracker has no name of its own, so its state carries the device's name.
+            hass.states.async_set(ent.entity_id, "home", {"mac": mac, "friendly_name": name})
+    dev_reg.async_update_device(devices[MAC_D].id, name_by_user="Garden Pump")
 
     entry = _entry("auto")
     await _setup(hass, entry)
     assert [h["name"] for h in entry.options["hubs"] if h["name"] == "Hallway Switch"] == []
     assert entry.runtime_data._suggestions == []
     nodes = _node_states(hass)
-    assert nodes["Device 53:0B"].attributes["kind"] == "device"
+    # A tracker that is on still names its client by the router's alias, as before 2026.11.
+    assert nodes["Hallway Switch" if tracker_on else "Device 53:0B"].attributes["kind"] == "device"
     assert {"Porch Light", "Garden Pump"} <= set(nodes)
+    pump = registry_by_mac(hass)[MAC_D]
+    assert (pump.name, pump.manufacturer, pump.model, pump.domain) == ("Garden Pump", "Acme", "Pump 2", "unifi")
 
 
 async def test_old_installs_look_names_up_again(hass: HomeAssistant, fake_net) -> None:

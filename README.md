@@ -101,10 +101,12 @@ Tip for two devices that look the same, such as two from the same maker: power o
 
 | Your setup | Hubs found | Devices placed under the right hub |
 | --- | --- | --- |
-| UniFi with the UniFi integration | Automatically | Automatically (wireless clients whose device tracker is on; from Home Assistant 2026.11 new ones start turned off) |
+| UniFi with the UniFi integration | Automatically | Automatically (wireless clients) |
 | Managed switches with SNMP on | Automatically | Automatically (wired and wireless, through the switch port) |
 | Netgear/Orbi with the Netgear integration | Suggested | Automatically, once you enable its "connected AP" sensors |
 | eero, Google/Nest Wifi, Deco, Velop, ISP routers | Suggested | By you: drag and drop, paste a list, or an AI assistant |
+
+From Home Assistant 2026.11, the UniFi integration adds new clients' device trackers turned off. NetOrbit reads a wireless client's access point from its tracker, so turn on the trackers of the clients you want placed.
 
 How to turn each of these on, step by step: [docs/SETUP.md](docs/SETUP.md).
 
