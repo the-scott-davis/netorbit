@@ -14,6 +14,7 @@
 - Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
 - **A popup left open no longer freezes the map.** The map didn't redraw while a popup was open, so one left open (on a wall panel, say) stopped all updates until someone closed it. The details popup now updates along with the map, and every popup closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
 - A tooltip shown on a map redrawn under the mouse now appears next to the pointer, not in the corner of the card (thanks @ninchistudios, #66).
+- **A lookup by IP finds the device that has the address now.** When DHCP gives a departed device's address to another device, services and assistant tools given that address no longer act on the departed one, and its sensor no longer shows the address (follow-up to #47). A device keeps its address while ARP still lists its MAC there, even when ARP lists another MAC for it too (a bridge on a second interface, say). This also takes offline a device that had already left before the upgrade to 0.3.0, unless it was tracked by hand with an IP (#65).
 
 ## 0.3.1
 
