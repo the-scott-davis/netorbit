@@ -205,6 +205,7 @@ async def test_device_that_left_before_the_upgrade_goes_offline(hass: HomeAssist
     await _advance(hass, freezer, 25 * 3600)
     assert _node_states(hass)[gone].state == "stale"
 
+
 async def test_hub_mac_not_in_arp_still_answers(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
     """A hub given a MAC that ARP never shows at its address (its base MAC, next to the LAN MAC
     ARP has) still gets credit for its replies."""

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from custom_components.netorbit.logic import (
+    address_taken,
     compute_status,
     fallback_name,
     guess_icon,
@@ -121,11 +122,28 @@ def test_keys_answering():
     b, c = "00:00:5e:00:53:0b", "00:00:5e:00:53:0c"
     macs = {b: b, c: c, "ip:192.0.2.10": None}
     # the reply came from C, so B (which last had this address) didn't answer
-    assert keys_answering([b, c], macs, c) == [c]
-    assert keys_answering([b], macs, c) == []
+    assert keys_answering([b, c], macs, [c]) == [c]
+    assert keys_answering([b], macs, [c]) == []
+    # ARP lists the address under both MACs (a bridge on a second interface): both answer,
+    # whichever is listed last
+    assert keys_answering([b, c], macs, [b, c]) == [b, c]
+    assert keys_answering([b], macs, [c, b]) == [b]
     # no known MAC to compare, or no ARP entry: the reply counts as before
-    assert keys_answering(["ip:192.0.2.10"], macs, c) == ["ip:192.0.2.10"]
-    assert keys_answering([b, c], macs, None) == [b, c]
+    assert keys_answering(["ip:192.0.2.10"], macs, [c]) == ["ip:192.0.2.10"]
+    assert keys_answering([b, c], macs, []) == [b, c]
+
+
+def test_address_taken():
+    b, c = "00:00:5e:00:53:0b", "00:00:5e:00:53:0c"
+    owners = {"192.0.2.10": {c}, "192.0.2.11": {b, c}}
+    assert address_taken(b, {"ip": "192.0.2.10", "mac": b}, owners)
+    # still among the MACs ARP lists there, or the address wasn't seen this sweep
+    assert not address_taken(b, {"ip": "192.0.2.11", "mac": b}, owners)
+    assert not address_taken(b, {"ip": "192.0.2.12", "mac": b}, owners)
+    # hubs keep their host; no address or no MAC: nothing to compare
+    assert not address_taken("hub:hall_ap", {"ip": "192.0.2.10", "mac": b}, owners)
+    assert not address_taken("ip:192.0.2.10", {"ip": "192.0.2.10"}, owners)
+    assert not address_taken(b, {"mac": b}, owners)
 
 
 def test_validate_subnet():
