@@ -56,7 +56,9 @@ jobs:
 
   browser:
     name: Browser tests (${{ matrix.browser }})
-    runs-on: ubuntu-latest
+    # Pinned: Playwright downloads a WebKit build for the host's Ubuntu release, so moving ubuntu-latest
+    # (24.04 to 26.04 in Nov 2026) left WebKit asking for libraries the new image doesn't have.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -73,12 +75,17 @@ jobs:
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.63.0 @mdi/js@7.4.47
           cp node_modules/@mdi/js/mdi.js scripts/preview/mdi.js
+      - name: Name the runner image
+        # The cached browser is built for one Ubuntu release; key the cache on the image so a runner
+        # change downloads a matching build instead of restoring one that can't load its libraries.
+        id: os
+        run: echo "image=$ImageOS" >> "$GITHUB_OUTPUT"
       - name: Cache the browser
         id: browsers
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-1.63.0-${{ runner.os }}-${{ matrix.browser }}
+          key: playwright-1.63.0-${{ steps.os.outputs.image }}-${{ matrix.browser }}
       - name: Make apt fail fast on a stalled mirror
         # A slow Ubuntu mirror once trickled the WebKit libraries until the job timed out. Time out a stalled
         # download and retry it instead, and cap the install steps, so a bad mirror fails within about 6 minutes.
