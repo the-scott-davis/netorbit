@@ -21,7 +21,9 @@ concurrency:
 jobs:
   home-assistant:
     name: Home Assistant ${{ matrix.ha }}
-    runs-on: ubuntu-latest
+    # Pinned: Playwright downloads a WebKit build for the host's Ubuntu release, so moving ubuntu-latest
+    # (24.04 to 26.04 in Nov 2026) left WebKit asking for libraries the new image doesn't have.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # A broken beta shows up as a warning on the run without blocking anything.
     continue-on-error: ${{ matrix.ha == 'beta' }}
@@ -61,7 +63,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('scripts/ci/requirements_e2e.txt') }}
+          # The cached browsers are built for one Ubuntu release. Keep the release in the key, and change it
+          # with runs-on, so a runner move downloads matching builds instead of restoring ones that can't load.
+          key: playwright-ubuntu-24.04-${{ hashFiles('scripts/ci/requirements_e2e.txt') }}
       - name: Install Chromium and WebKit
         if: steps.browsers.outputs.cache-hit != 'true'
         run: python -m playwright install --with-deps chromium webkit
