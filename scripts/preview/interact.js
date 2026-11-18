@@ -1172,10 +1172,16 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const key = (l) => bp.evaluate((x) => Object.values(window.NETORBIT_SCENARIOS.chain).find((s) => s.attributes.label === x).attributes.node_key, l);
     const crumbs = () => cb.locator(".crumbs").count().then((n) => (n ? cb.locator(".crumbs").innerText().then((t) => t.replace(/\s+/g, " ").trim()) : ""));
     const press = async (label) => {
-      const b = await cb.locator(`.node[data-key="${await key(label)}"] circle.disc`).boundingBox();
+      const k = await key(label);
+      const b = await cb.locator(`.node[data-key="${k}"] circle.disc`).boundingBox();
       await bp.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
       await bp.mouse.down();
-      await bp.waitForTimeout(750);
+      // Hold until the card takes it as a long-press (it marks the hub "drill" when its 550 ms timer fires), not for
+      // a fixed time: on a busy CI runner that timer could still be pending at 750 ms, the release cancelled it, and
+      // the branch never changed. Still held for at least 750 ms, and a press the card never takes fails below.
+      const held = Date.now();
+      await cb.locator(`.node.drill[data-key="${k}"]`).waitFor({ state: "attached", timeout: 5000 }).catch(() => {});
+      await bp.waitForTimeout(Math.max(0, 750 - (Date.now() - held)));
       await bp.mouse.up();
       await bp.waitForTimeout(300);
     };
