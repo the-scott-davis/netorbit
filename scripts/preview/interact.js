@@ -1174,17 +1174,42 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const press = async (label) => {
       const k = await key(label);
       const b = await cb.locator(`.node[data-key="${k}"] circle.disc`).boundingBox();
-      await bp.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      // DIAG (temporary): what the press hits, the card's hold state, and the pointer events it sees.
+      const px = b.x + b.width / 2, py = b.y + b.height / 2;
+      const snap = () => bp.evaluate(([x, y]) => {
+        const c = document.querySelector("netorbit-card"); const r = c.shadowRoot;
+        const e = r.elementFromPoint(x, y); const n = e && e.closest(".node");
+        return { hit: n ? n.getAttribute("data-key") + "." + n.getAttribute("class") : (e ? e.tagName + "." + e.getAttribute("class") : "none"),
+          pop: !!r.querySelector(".pop"), popOpen: c._popOpen, popPressed: c._popPressed, zooming: c._zooming, held: c._held, drag: !!c._drag,
+          edit: c._edit, focus: c._focus, drill: r.querySelectorAll(".node.drill").length, t: Math.round(performance.now()) };
+      }, [px, py]);
+      await bp.evaluate(() => {
+        window.__pl = [];
+        if (window.__plOn) return; window.__plOn = true;
+        ["pointerdown", "pointerup", "pointercancel", "pointerleave", "lostpointercapture", "click"].forEach((t) => document.querySelector("netorbit-card").shadowRoot.addEventListener(t, (ev) => {
+          const el = ev.composedPath()[0]; const n = el && el.closest && el.closest(".node");
+          window.__pl.push(`${Math.round(performance.now())} ${t} ${n ? n.getAttribute("data-key") : (el && el.tagName) + "." + (el && el.getAttribute && el.getAttribute("class"))}`);
+        }, true));
+      });
+      const diag = { label, box: [Math.round(px), Math.round(py)], before: await snap() };
+      lastPress = diag;
+      await bp.mouse.move(px, py);
       await bp.mouse.down();
       // Hold until the card takes it as a long-press (it marks the hub "drill" when its 550 ms timer fires), not for
       // a fixed time: on a busy CI runner that timer could still be pending at 750 ms, the release cancelled it, and
       // the branch never changed. Still held for at least 750 ms, and a press the card never takes fails below.
       const held = Date.now();
-      await cb.locator(`.node.drill[data-key="${k}"]`).waitFor({ state: "attached", timeout: 5000 }).catch(() => {});
+      diag.down = await snap();
+      diag.drilled = await cb.locator(`.node.drill[data-key="${k}"]`).waitFor({ state: "attached", timeout: 5000 }).then(() => Date.now() - held, () => "never");
       await bp.waitForTimeout(Math.max(0, 750 - (Date.now() - held)));
+      diag.beforeUp = await snap();
       await bp.mouse.up();
       await bp.waitForTimeout(300);
+      diag.after = await snap();
+      diag.events = await bp.evaluate(() => window.__pl);
     };
+    let lastPress = null;
+    const why = () => "DIAG " + JSON.stringify(lastPress);
     const viewBox = () => cb.locator("svg.map").getAttribute("viewBox").then((v) => v.split(" ").map(Number).join(" "));
     assert.ok(await cb.locator(".lay button[data-l=radial].on").count(), "radial by default");
     assert.strictEqual(await viewBox(), "-70 -40 1140 1090");
@@ -1209,12 +1234,12 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.ok(!share.includes('class="ring"') && !share.includes('viewBox="-70 -40 1140 1090"'), "the share image is the balloon map");
     // Long-press a hub: just its branch, with the hub above it in grey.
     await press("Rack Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch", why());
     assert.ok(await cb.locator(`.node.up[data-key="${await key("Router")}"]`).count(), "the router hangs off the branch in grey");
     assert.strictEqual(await cb.locator(`.node[data-key="${await key("Downstairs AP")}"]`).count(), 0, "other branches left out");
     assert.strictEqual(await bp.evaluate(() => (window.calls || []).length), 0, "a long-press opens nothing");
     await press("Shed Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch", why());
     // The tap straight after a long-press is a real tap: it opens the device's details (and More info there opens the
     // device), not swallowed by the press before it.
     await bp.evaluate(() => { window.moreInfo = null; document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)); });
@@ -1226,13 +1251,13 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.ok(await bp.evaluate(() => window.moreInfo), "a tap right after a long-press opens the device");
     // Long-press the grey hub to go up a level; the row under the header goes back to the whole map.
     await press("Rack Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch", why());
     await cb.locator(".crumbs .cr.back").click();
     assert.strictEqual(await crumbs(), "", "whole map again");
     // The radial map has branches too.
     await cb.locator(".lay button[data-l=radial]").click();
     await press("Shed Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch", why());
     assert.strictEqual(await viewBox(), "-70 -40 1140 1090");
     await cb.locator(".lay button[data-l=balloon]").click();
     // Another card, set to radial with no switch, stays radial whatever was picked on the first one.
