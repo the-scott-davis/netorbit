@@ -12,6 +12,7 @@ from custom_components.netorbit.logic import (
     keys_answering,
     normalize_mac,
     parse_proc_arp,
+    parse_proc_arp_all,
     rollup_status,
     short_hostname,
     slugify_id,
@@ -100,6 +101,20 @@ def test_parse_arp():
         "192.0.2.12       0x1         0x2         00:00:5E:00:53:0C     *        eth0\n"
     )
     assert parse_proc_arp(text) == {"192.0.2.10": "00:00:5e:00:53:0b", "192.0.2.12": "00:00:5e:00:53:0c"}
+
+
+def test_parse_arp_lists_every_mac_for_an_address():
+    text = (
+        "IP address       HW type     Flags       HW address            Mask     Device\n"
+        "192.0.2.10       0x1         0x2         00:00:5e:00:53:0b     *        eth0\n"
+        "192.0.2.10       0x1         0x2         00:00:5e:00:53:0c     *        br0\n"
+        "192.0.2.11       0x1         0x2         00:00:5e:00:53:0d     *        eth0\n"
+    )
+    assert parse_proc_arp_all(text) == {
+        "192.0.2.10": ["00:00:5e:00:53:0b", "00:00:5e:00:53:0c"],
+        "192.0.2.11": ["00:00:5e:00:53:0d"],
+    }
+    assert parse_proc_arp(text) == {"192.0.2.10": "00:00:5e:00:53:0c", "192.0.2.11": "00:00:5e:00:53:0d"}
 
 
 def test_keys_answering():

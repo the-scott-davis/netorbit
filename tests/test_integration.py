@@ -180,6 +180,31 @@ async def test_address_handed_to_another_device(hass: HomeAssistant, fake_net, f
     assert _node_states(hass)[gone].state == "recent"
 
 
+@pytest.mark.parametrize("named", [False, True])
+async def test_device_that_left_before_the_upgrade_goes_offline(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory, named: bool) -> None:
+    """A store from before 0.3.0 has no arp_ip. A device that had already left, whose address
+    went to another device, still goes offline once a sweep sees the address on the other MAC (#65)."""
+    mac_d = "00:00:5e:00:53:0d"
+    fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12"}
+    fake_net.arp = {"192.0.2.11": MAC_B, "192.0.2.12": mac_d}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    gone = "Device 53:0B"
+    if named:
+        await hass.services.async_call(DOMAIN, "track_device", {"mac": MAC_B, "name": "Old Pi"}, blocking=True)
+        gone = "Old Pi"
+    assert _node_states(hass)[gone].state == "online"
+
+    # B left before the upgrade and D has its address; the upgraded store knows no arp_ip yet
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": mac_d}
+    for rec in entry.runtime_data._seen.values():
+        rec.pop("arp_ip", None)
+    await _advance(hass, freezer, 61)
+    await _advance(hass, freezer, 300)
+    await _advance(hass, freezer, 25 * 3600)
+    assert _node_states(hass)[gone].state == "stale"
+
 async def test_hub_mac_not_in_arp_still_answers(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
     """A hub given a MAC that ARP never shows at its address (its base MAC, next to the LAN MAC
     ARP has) still gets credit for its replies."""
