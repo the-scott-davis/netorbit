@@ -1,7 +1,10 @@
 name: Validate
 
 on:
+  # Push only on main, as in e2e.yml: a branch with a PR already runs on pull_request, and its push run
+  # can't use the PR's browser cache, so it reinstalled WebKit from a slow mirror and timed out.
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "0 6 * * 1"
