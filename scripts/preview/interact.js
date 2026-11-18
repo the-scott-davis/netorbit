@@ -1181,15 +1181,19 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
         const e = r.elementFromPoint(x, y); const n = e && e.closest(".node");
         return { hit: n ? n.getAttribute("data-key") + "." + n.getAttribute("class") : (e ? e.tagName + "." + e.getAttribute("class") : "none"),
           pop: !!r.querySelector(".pop"), popOpen: c._popOpen, popPressed: c._popPressed, zooming: c._zooming, held: c._held, drag: !!c._drag,
-          edit: c._edit, focus: c._focus, drill: r.querySelectorAll(".node.drill").length, t: Math.round(performance.now()) };
+          edit: c._edit, focus: c._focus, drill: r.querySelectorAll(".node.drill").length, t: Math.round(performance.now()),
+          scroll: [window.scrollX, window.scrollY], vb: r.querySelector("svg.map").getAttribute("viewBox"), svg: (() => { const q = r.querySelector("svg.map").getBoundingClientRect(); return [q.x, q.y, q.width, q.height].map(Math.round); })(),
+          rack: (() => { const d = r.querySelector('.node[data-key="hub:rack"] circle.disc'); if (!d) return null; const q = d.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2].map(Math.round); })(), card: Math.round(c.getBoundingClientRect().height) };
       }, [px, py]);
       await bp.evaluate(() => {
         window.__pl = [];
         if (window.__plOn) return; window.__plOn = true;
-        ["pointerdown", "pointerup", "pointercancel", "pointerleave", "lostpointercapture", "click"].forEach((t) => document.querySelector("netorbit-card").shadowRoot.addEventListener(t, (ev) => {
+        ["pointerdown", "pointerup", "pointercancel", "pointerleave", "pointerover", "lostpointercapture", "click"].forEach((t) => document.querySelector("netorbit-card").shadowRoot.addEventListener(t, (ev) => {
           const el = ev.composedPath()[0]; const n = el && el.closest && el.closest(".node");
           window.__pl.push(`${Math.round(performance.now())} ${t} ${n ? n.getAttribute("data-key") : (el && el.tagName) + "." + (el && el.getAttribute && el.getAttribute("class"))}`);
         }, true));
+        window.addEventListener("scroll", () => window.__pl.push(`${Math.round(performance.now())} scroll ${window.scrollY}`), true);
+        new ResizeObserver(() => window.__pl.push(`${Math.round(performance.now())} resize card ${Math.round(document.querySelector("netorbit-card").getBoundingClientRect().height)}`)).observe(document.querySelector("netorbit-card"));
       });
       const diag = { label, box: [Math.round(px), Math.round(py)], before: await snap() };
       lastPress = diag;
