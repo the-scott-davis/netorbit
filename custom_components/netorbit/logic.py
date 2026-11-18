@@ -170,6 +170,21 @@ def useful_name(name: str | None) -> str | None:
     return name
 
 
+_PARTIAL_MAC_TAIL = re.compile(r"(?:^|\s)[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$", re.I)
+
+
+def tracker_label(name: str | None) -> str | None:
+    """A device tracker's name, or None when it is only a maker and the end of a MAC.
+
+    Nmap names a client that has no hostname "<maker> <last three MAC bytes>"
+    ("Acme 00:53:0C"); that says less than the name NetOrbit finds itself.
+    """
+    name = useful_name(name)
+    if not name or _PARTIAL_MAC_TAIL.search(name):
+        return None
+    return name
+
+
 def ping_label(name: str | None) -> str | None:
     """'Ping Hallway AP' -> 'Hallway AP'. People often prefix ping sensors with the word."""
     name = useful_name(name)
