@@ -58,17 +58,14 @@ jobs:
             ghcr.io/home-assistant/home-assistant:${{ steps.image.outputs.tag }}
 
       # Home Assistant boots while the browsers install.
-      - name: Name the runner image
-        # The cached browsers are built for one Ubuntu release; key the cache on the image so a runner
-        # change downloads matching builds instead of restoring ones that can't load their libraries.
-        id: os
-        run: echo "image=$ImageOS" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         id: browsers
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ steps.os.outputs.image }}-${{ hashFiles('scripts/ci/requirements_e2e.txt') }}
+          # The cached browsers are built for one Ubuntu release. Keep the release in the key, and change it
+          # with runs-on, so a runner move downloads matching builds instead of restoring ones that can't load.
+          key: playwright-ubuntu-24.04-${{ hashFiles('scripts/ci/requirements_e2e.txt') }}
       - name: Install Chromium and WebKit
         if: steps.browsers.outputs.cache-hit != 'true'
         run: python -m playwright install --with-deps chromium webkit
