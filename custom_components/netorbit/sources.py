@@ -55,10 +55,28 @@ def _is_tracker_only(ent_reg: er.EntityRegistry, dev: dr.DeviceEntry) -> bool:
     router integrations) gets a device of its own, named by that integration after an
     alias, a hostname or the maker plus part of the MAC, and most of these trackers start
     turned off. Such a device says nothing about what the client is, so it must not make
-    a client look like network gear or outrank the name NetOrbit found for it.
+    a client look like network gear, and a name it made up must not outrank the name
+    NetOrbit found for it.
     """
     entities = er.async_entries_for_device(ent_reg, dev.id, include_disabled_entities=True)
     return bool(entities) and all(ent.domain == "device_tracker" for ent in entities)
+
+
+def _tracker_device_name(ent_reg: er.EntityRegistry, dev: dr.DeviceEntry) -> str | None:
+    """What a device that holds only device trackers calls its client.
+
+    A name the user gave the device, or its tracker, comes first. Then the router's own name
+    for the client (an alias set in the router's app, or a hostname), which counts whether the
+    tracker is on or off, unless it is only the maker and the end of the MAC.
+    """
+    name = useful_name(dev.name_by_user)
+    if name:
+        return name
+    for ent in er.async_entries_for_device(ent_reg, dev.id, include_disabled_entities=True):
+        name = useful_name(ent.name)
+        if name:
+            return name
+    return tracker_label(dev.name)
 
 
 def _device_domain(hass: HomeAssistant, dev: dr.DeviceEntry) -> str | None:
@@ -85,9 +103,9 @@ def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
             continue
         domain = _device_domain(hass, dev)
         if _is_tracker_only(ent_reg, dev):
-            # Of the name only one the user gave the tracker's device counts. The tracker's own
-            # name still comes through `tracker_names_by_mac` while the tracker is on.
-            info = RegistryInfo(useful_name(dev.name_by_user), dev.model, dev.manufacturer, domain, tracker_only=True)
+            # Its name counts unless the integration made it up (maker plus part of the MAC),
+            # so a client the router knows by name keeps it while its tracker is off.
+            info = RegistryInfo(_tracker_device_name(ent_reg, dev), dev.model, dev.manufacturer, domain, tracker_only=True)
             for mac in macs:
                 old = trackers.get(mac)
                 trackers[mac] = info if old is None else RegistryInfo(
