@@ -2148,10 +2148,7 @@ class NetOrbitCard extends HTMLElement {
 
   _wire(model) {
     const { hubs, devices } = model;
-    const all = {};
-    Object.values(hubs).forEach((h) => (all[h.key] = h));
-    devices.forEach((d) => (all[d.key] = d));
-    if (model.internet) all.internet = model.internet;
+    const all = netorbitNodeMap(model);
     const root = model.root;
     const col = (s) => (s === "group" ? "#64748b" : (NO_STATUS[s] || NO_STATUS.unknown).color);
     const tip = this.shadowRoot.querySelector(".tip");
@@ -2826,18 +2823,18 @@ class NetOrbitCard extends HTMLElement {
   // After a redraw, the details popup again from the new data. A node no longer on the map closes it.
   _reopenDetails(s) {
     const c = this._detailsCtx;
-    // Read the node from the whole map: while a branch is on show, its hub above is a grey "up" copy that would
-    // be labelled a Device with the wrong parent.
-    const full = this._full;
-    const all = c && full ? netorbitNodeMap(full) : (c && c.all);
-    const n = c && c.wrap.isConnected && all[s.key];
+    // The node must still be drawn (c.all is what is on screen, a branch's own nodes while one is on show).
+    const drawn = c && c.wrap.isConnected && c.all[s.key];
+    // Its details come from the whole map: while a branch is on show, the hub above it is a grey "up" copy that
+    // would be labelled a Device with the wrong parent.
+    const n = drawn && (this._full ? netorbitNodeMap(this._full)[s.key] : drawn);
     if (!n) {
       if (this._popOff) this._popOff();
       this._popOpen = false;
       this._liveDetails = null;
       return;
     }
-    this._detailsPopup(n, s.ev, c.wrap, c.place, full ? full.hubs : c.hubs, all, c.col, s);
+    this._detailsPopup(n, s.ev, c.wrap, c.place, this._full ? this._full.hubs : c.hubs, c.all, c.col, s);
   }
 
   _detailsEdit(n, ev, wrap, place, hubs, all, col) {

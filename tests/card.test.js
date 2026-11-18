@@ -160,6 +160,44 @@ test("the details popup reads a node from the whole map, not the grey up hub of 
   assert.strictEqual(all.s2.key, "s2");
 });
 
+test("reopening the details popup on a branch: the hub above reopens from the whole map, a node off screen closes it", () => {
+  const m = chain();
+  m.internet = { key: "internet", status: "online" };
+  const branch = netorbitFocus(m, "s2");
+  assert.strictEqual(branch.hubs.s1.kind, "uphub");
+  assert.ok(!branch.hubs.ap1, "ap1 is not on show in the branch");
+  const card = new globalThis.NetOrbitCard();
+  const shown = [];
+  let closed = 0;
+  card._detailsPopup = (n, ev, w, place, hubs, all, col, keep) => shown.push({ n, hubs, all });
+  card._popOff = () => closed++;
+  card._full = m;
+  // What _wire leaves behind for the branch on show: its own nodes, and the wrap that is still on the page.
+  const wrap = { isConnected: true };
+  const onScreen = netorbitNodeMap(branch);
+  const setCtx = () => {
+    card._detailsCtx = { wrap, place: () => {}, hubs: branch.hubs, all: onScreen, col: () => "" };
+  };
+  const keep = { ev: {}, left: "", top: "", scroll: 0, touched: 0 };
+
+  setCtx();
+  card._reopenDetails(Object.assign({ key: "s1" }, keep));
+  assert.strictEqual(shown.length, 1, "the hub above the branch is still drawn, so the popup reopens");
+  assert.notStrictEqual(shown[0].n.kind, "uphub", "from the whole map, not the grey up hub");
+  assert.strictEqual(shown[0].n.parent, "r", "with its own parent, the router");
+  assert.strictEqual(shown[0].hubs, m.hubs, "and the whole map's hubs for the Via row");
+  assert.strictEqual(shown[0].all, onScreen, "while links still go to what is on screen");
+
+  setCtx();
+  card._popOpen = true;
+  card._liveDetails = { key: "ap1" };
+  card._reopenDetails(Object.assign({ key: "ap1" }, keep));
+  assert.strictEqual(shown.length, 1, "a node outside the branch is not drawn, so no popup");
+  assert.strictEqual(closed, 1, "and the popup closes");
+  assert.strictEqual(card._popOpen, false);
+  assert.strictEqual(card._liveDetails, null);
+});
+
 test("balloon: drawn labels run out from the device's own hub", () => {
   const m = chain();
   const D = netorbitDraw(m, {}, { layout: "balloon" });
