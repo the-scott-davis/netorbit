@@ -1172,48 +1172,25 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const key = (l) => bp.evaluate((x) => Object.values(window.NETORBIT_SCENARIOS.chain).find((s) => s.attributes.label === x).attributes.node_key, l);
     const crumbs = () => cb.locator(".crumbs").count().then((n) => (n ? cb.locator(".crumbs").innerText().then((t) => t.replace(/\s+/g, " ").trim()) : ""));
     const press = async (label) => {
-      const k = await key(label);
-      const b = await cb.locator(`.node[data-key="${k}"] circle.disc`).boundingBox();
-      // DIAG (temporary): what the press hits, the card's hold state, and the pointer events it sees.
-      const px = b.x + b.width / 2, py = b.y + b.height / 2;
-      const snap = () => bp.evaluate(([x, y]) => {
-        const c = document.querySelector("netorbit-card"); const r = c.shadowRoot;
-        const e = r.elementFromPoint(x, y); const n = e && e.closest(".node");
-        return { hit: n ? n.getAttribute("data-key") + "." + n.getAttribute("class") : (e ? e.tagName + "." + e.getAttribute("class") : "none"),
-          pop: !!r.querySelector(".pop"), popOpen: c._popOpen, popPressed: c._popPressed, zooming: c._zooming, held: c._held, drag: !!c._drag,
-          edit: c._edit, focus: c._focus, drill: r.querySelectorAll(".node.drill").length, t: Math.round(performance.now()),
-          scroll: [window.scrollX, window.scrollY], vb: r.querySelector("svg.map").getAttribute("viewBox"), svg: (() => { const q = r.querySelector("svg.map").getBoundingClientRect(); return [q.x, q.y, q.width, q.height].map(Math.round); })(),
-          rack: (() => { const d = r.querySelector('.node[data-key="hub:rack"] circle.disc'); if (!d) return null; const q = d.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2].map(Math.round); })(), card: Math.round(c.getBoundingClientRect().height) };
-      }, [px, py]);
-      await bp.evaluate(() => {
-        window.__pl = [];
-        if (window.__plOn) return; window.__plOn = true;
-        ["pointerdown", "pointerup", "pointercancel", "pointerleave", "pointerover", "lostpointercapture", "click"].forEach((t) => document.querySelector("netorbit-card").shadowRoot.addEventListener(t, (ev) => {
-          const el = ev.composedPath()[0]; const n = el && el.closest && el.closest(".node");
-          window.__pl.push(`${Math.round(performance.now())} ${t} ${n ? n.getAttribute("data-key") : (el && el.tagName) + "." + (el && el.getAttribute && el.getAttribute("class"))}`);
-        }, true));
-        window.addEventListener("scroll", () => window.__pl.push(`${Math.round(performance.now())} scroll ${window.scrollY}`), true);
-        new ResizeObserver(() => window.__pl.push(`${Math.round(performance.now())} resize card ${Math.round(document.querySelector("netorbit-card").getBoundingClientRect().height)}`)).observe(document.querySelector("netorbit-card"));
-      });
-      const diag = { label, box: [Math.round(px), Math.round(py)], before: await snap() };
-      lastPress = diag;
-      await bp.mouse.move(px, py);
+      // Measure the hub only once the card has stopped moving. A redraw (closing a popup, say) can grow the header a
+      // moment later, as its icons render, and push the map down: on CI the card grew 37 px within 20 ms of the
+      // press, so a hub measured before that was pressed above its disc and the long-press never started.
+      const disc = cb.locator(`.node[data-key="${await key(label)}"] circle.disc`);
+      const frames = () => bp.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      let b = await disc.boundingBox();
+      for (let i = 0; i < 20; i++) {
+        await frames();
+        await bp.waitForTimeout(50);
+        const n = await disc.boundingBox();
+        if (n.x === b.x && n.y === b.y) break;
+        b = n;
+      }
+      await bp.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
       await bp.mouse.down();
-      // Hold until the card takes it as a long-press (it marks the hub "drill" when its 550 ms timer fires), not for
-      // a fixed time: on a busy CI runner that timer could still be pending at 750 ms, the release cancelled it, and
-      // the branch never changed. Still held for at least 750 ms, and a press the card never takes fails below.
-      const held = Date.now();
-      diag.down = await snap();
-      diag.drilled = await cb.locator(`.node.drill[data-key="${k}"]`).waitFor({ state: "attached", timeout: 5000 }).then(() => Date.now() - held, () => "never");
-      await bp.waitForTimeout(Math.max(0, 750 - (Date.now() - held)));
-      diag.beforeUp = await snap();
+      await bp.waitForTimeout(750);
       await bp.mouse.up();
       await bp.waitForTimeout(300);
-      diag.after = await snap();
-      diag.events = await bp.evaluate(() => window.__pl);
     };
-    let lastPress = null;
-    const why = () => "DIAG " + JSON.stringify(lastPress);
     const viewBox = () => cb.locator("svg.map").getAttribute("viewBox").then((v) => v.split(" ").map(Number).join(" "));
     assert.ok(await cb.locator(".lay button[data-l=radial].on").count(), "radial by default");
     assert.strictEqual(await viewBox(), "-70 -40 1140 1090");
@@ -1238,12 +1215,12 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.ok(!share.includes('class="ring"') && !share.includes('viewBox="-70 -40 1140 1090"'), "the share image is the balloon map");
     // Long-press a hub: just its branch, with the hub above it in grey.
     await press("Rack Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch", why());
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch");
     assert.ok(await cb.locator(`.node.up[data-key="${await key("Router")}"]`).count(), "the router hangs off the branch in grey");
     assert.strictEqual(await cb.locator(`.node[data-key="${await key("Downstairs AP")}"]`).count(), 0, "other branches left out");
     assert.strictEqual(await bp.evaluate(() => (window.calls || []).length), 0, "a long-press opens nothing");
     await press("Shed Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch", why());
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch");
     // The tap straight after a long-press is a real tap: it opens the device's details (and More info there opens the
     // device), not swallowed by the press before it.
     await bp.evaluate(() => { window.moreInfo = null; document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)); });
@@ -1255,13 +1232,13 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.ok(await bp.evaluate(() => window.moreInfo), "a tap right after a long-press opens the device");
     // Long-press the grey hub to go up a level; the row under the header goes back to the whole map.
     await press("Rack Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch", why());
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch");
     await cb.locator(".crumbs .cr.back").click();
     assert.strictEqual(await crumbs(), "", "whole map again");
     // The radial map has branches too.
     await cb.locator(".lay button[data-l=radial]").click();
     await press("Shed Switch");
-    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch", why());
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch");
     assert.strictEqual(await viewBox(), "-70 -40 1140 1090");
     await cb.locator(".lay button[data-l=balloon]").click();
     // Another card, set to radial with no switch, stays radial whatever was picked on the first one.
