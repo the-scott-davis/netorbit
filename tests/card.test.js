@@ -448,6 +448,107 @@ test("with names shown, a name holding any form of address is replaced", () => {
   for (const n of leaky) assert.notStrictEqual(sharedLabel(n), n, n + " should be replaced");
 });
 
+// A card for the offline tests: hass from a list of states, every sensor in the entity registry as NetOrbit's
+// (device D1) unless told otherwise, and just enough DOM for the note. _render stands in for a redraw, which
+// brings a fresh header and Edit button and no note.
+const offStates = () => {
+  const st = (id, attrs, state = "online") => ({ entity_id: id, state, attributes: Object.assign({ netorbit: true }, attrs) });
+  return [
+    st("sensor.sum", { kind: "summary", config_entry_id: "E1" }, "1"),
+    st("sensor.r", { kind: "hub", node_key: "hub:gateway", label: "Router", hub_type: "router" }),
+    st("sensor.pc", { kind: "device", node_key: "00:00:5e:00:53:10", mac: "00:00:5E:00:53:10", link: "hub:gateway", label: "PC" }),
+  ];
+};
+const offDown = (list) => list.map((s) => ({ entity_id: s.entity_id, state: "unavailable", attributes: {} }));
+const offReg = (list, device = "D1") => Object.fromEntries(list.map((s) => [s.entity_id, { entity_id: s.entity_id, platform: "netorbit", device_id: device }]));
+const offHass = (list, entities) => ({ states: Object.fromEntries(list.map((s) => [s.entity_id, s])), entities, user: { is_admin: true } });
+
+function offlineCard(config, run) {
+  const saved = globalThis.document;
+  globalThis.document = { createElement: () => ({ attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } }) };
+  try {
+    const card = new globalThis.NetOrbitCard();
+    const dom = { note: null, notes: 0, btn: null };
+    const head = { after: (n) => { dom.note = n; dom.notes++; } };
+    const haCard = { querySelector: (sel) => ({ ".head": head, ".banner.offline": dom.note, ".editbtn": dom.btn })[sel] || null };
+    card.shadowRoot = { querySelector: (sel) => (sel === "ha-card" ? haCard : null) };
+    card.drawn = [];
+    card._render = (m) => { card.drawn.push(m); card._model_ = m; dom.note = null; dom.btn = { disabled: false }; };
+    card.setConfig(config);
+    run(card, dom);
+  } finally {
+    globalThis.document = saved;
+  }
+}
+
+test("sensors gone unavailable after a map was drawn: the last map stays with a note until data comes back", () => {
+  const up = offStates();
+  const reg = offReg(up);
+  offlineCard({}, (card, dom) => {
+    card.hass = offHass(up, reg);
+    assert.strictEqual(card.drawn.length, 1);
+    card.hass = offHass(offDown(up), reg);
+    assert.strictEqual(card.drawn.length, 1, "no redraw to 'No NetOrbit sensors found'");
+    assert.strictEqual(dom.note.className, "banner offline");
+    assert.strictEqual(dom.note.attrs.role, "status");
+    assert.match(dom.note.textContent, /^NetOrbit hasn't sent an update since .+\. This is the last map it sent; it updates again when NetOrbit is back\.$/);
+    assert.strictEqual(dom.btn.disabled, true, "Edit layout waits for NetOrbit");
+    card.hass = offHass(offDown(up), reg);
+    assert.deepStrictEqual([card.drawn.length, dom.notes], [1, 1], "one note, however many updates come in meanwhile");
+    card.hass = offHass(up, reg);
+    assert.strictEqual(card.drawn.length, 2, "the first update with data draws the map again");
+    assert.ok(card.drawn[1].root);
+    assert.deepStrictEqual([dom.note, dom.btn.disabled], [null, false], "and the note is gone");
+  });
+});
+
+test("while NetOrbit is offline, Edit layout ends and a layout change redraws the last map", () => {
+  const up = offStates();
+  const reg = offReg(up);
+  offlineCard({}, (card, dom) => {
+    card.hass = offHass(up, reg);
+    card._edit = true;
+    card._sig = "";
+    card.hass = offHass(up, reg);
+    assert.strictEqual(card.drawn.length, 2);
+    const last = card.drawn[1];
+    card.hass = offHass(offDown(up), reg);
+    assert.strictEqual(card._edit, false);
+    assert.strictEqual(card.drawn.length, 3, "the last map again, out of Edit layout");
+    assert.strictEqual(card.drawn[2], last);
+    assert.ok(dom.note && dom.btn.disabled);
+    card._setLayout("balloon");
+    assert.strictEqual(card.drawn.length, 4, "the switch redraws the last map in the other layout");
+    assert.strictEqual(card.drawn[3], last);
+    assert.strictEqual(card._layoutName(), "balloon");
+    assert.ok(dom.note);
+    card.hass = offHass(offDown(up), reg);
+    assert.strictEqual(card.drawn.length, 4, "nothing else changed: no redraw");
+  });
+});
+
+test("a card whose NetOrbit sensors are gone says so instead of keeping the last map", () => {
+  const up = offStates();
+  // The integration removed: its sensors leave the registry and the states.
+  offlineCard({}, (card, dom) => {
+    card.hass = offHass(up, offReg(up));
+    card.hass = offHass([], {});
+    assert.strictEqual(card.drawn.length, 2);
+    assert.ok(!card.drawn[1].root, "No NetOrbit sensors found");
+    assert.strictEqual(dom.note, null);
+  });
+  // The card now points at another NetOrbit device: a new config forgets the last map.
+  offlineCard({ device_id: "D1" }, (card, dom) => {
+    card.hass = offHass(up, offReg(up));
+    card.setConfig({ device_id: "D2" });
+    assert.deepStrictEqual([card._model_, card._lastGood], [null, 0]);
+    card.hass = offHass(offDown(up), offReg(up));
+    assert.strictEqual(card.drawn.length, 2);
+    assert.ok(!card.drawn[1].root);
+    assert.strictEqual(dom.note, null);
+  });
+});
+
 test("with names shown, ordinary names stay", () => {
   // Names made of the letters a to f only (Deadbeef, Facade) are words, not addresses: six hex characters need a digit.
   // A name needs more than a short number or a version to be treated as an address.

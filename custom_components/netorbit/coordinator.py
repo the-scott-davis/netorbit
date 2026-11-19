@@ -97,6 +97,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PING_COUNT = 2
 PING_TIMEOUT = 1.5
+# The failed round in a row (network error) that makes the sensors unavailable; the rounds before it keep the last map.
+UNAVAILABLE_ON_FAILED_ROUND = 3
 SWEEP_TIMEOUT = 1.0
 DNS_TIMEOUT = 2.0
 DNS_REFRESH = timedelta(hours=12)
@@ -198,6 +200,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._initialized = False
         self._last_sweep: datetime | None = None
         self._last_snmp_probe: datetime | None = None
+        self._failed_rounds = 0  # rounds in a row that failed on a network error
         self._prev_status: dict[str, str] = {}
         self._alive_keys: set[str] = set()  # keys that answered the last ping round
         # Internet check: None until the first answer or INTERNET_DOWN_AFTER misses in a row.
@@ -338,7 +341,14 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 await self._sweep(now)
             alive = await self._ping_tracked()
         except OSError as err:
+            # One failed round (a moment without a route, a busy socket) must not make every sensor
+            # unavailable and blank the map: keep the last map for a couple of rounds, then report it.
+            self._failed_rounds += 1
+            if self.data is not None and self._failed_rounds < UNAVAILABLE_ON_FAILED_ROUND:
+                _LOGGER.warning("NetOrbit: a round failed (%s), keeping the last map", err)
+                return self.data
             raise UpdateFailed(f"Network error: {err}") from err
+        self._failed_rounds = 0
 
         self._note_internet(now, [k for k, _ in alive if k.startswith(f"{INTERNET_KEY}:")])
         alive = [(k, ip) for k, ip in alive if not k.startswith(f"{INTERNET_KEY}:")]
