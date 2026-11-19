@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A name you gave a client in your router's app shows while its tracker is off** (#100). On Home Assistant 2026.11 most router clients' trackers start turned off. NetOrbit now takes the router's own name for such a client (an alias or a hostname) and drops only the made-up ones (the maker plus part of the MAC). A name you gave the device or its tracker in Home Assistant still comes first, and with *Prefer DNS and Bonjour names* off the router's name comes before the DNS or Bonjour name, as names from other integrations do.
+
 ## 0.4.0b1
 
 ### Added
