@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0b1
 
 ### Added
 - **Tap a hub or device for its details.** Outside Edit layout, a tap opens a NetOrbit popup with the DNS name, IP, MAC, maker, the hub it connects through and how it was placed, when it was first and last seen, and any text you attached to it. *More info* still opens Home Assistant's own dialog. Admins get *Edit* there to change the name, *Managed by* and the extra fields.
