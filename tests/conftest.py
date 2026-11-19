@@ -86,7 +86,6 @@ def fake_net():
     with (
         patch("icmplib.async_multiping", side_effect=multiping),
         patch("icmplib.async_ping", side_effect=net.ping),
-        patch("custom_components.netorbit.coordinator._read_arp", side_effect=lambda: dict(net.arp)),
         patch("custom_components.netorbit.coordinator._read_arp_all", side_effect=net.arp_all),
         patch("custom_components.netorbit.coordinator._reverse_dns", side_effect=lambda ip: net.dns.get(ip)),
         patch("custom_components.netorbit.coordinator.mdns_name", side_effect=net.mdns_name),

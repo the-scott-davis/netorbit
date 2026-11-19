@@ -75,6 +75,7 @@ from .const import (
 )
 from .detect import NETWORK_VENDORS, Evidence, classify, pretty_vendor
 from .logic import (
+    address_taken,
     compute_status,
     fallback_name,
     guess_icon,
@@ -82,7 +83,6 @@ from .logic import (
     is_random_mac,
     keys_answering,
     normalize_mac,
-    parse_proc_arp,
     parse_proc_arp_all,
     rollup_status,
     short_hostname,
@@ -436,8 +436,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             for mac, ip in mac_ip.items():
                 owners.setdefault(ip, set()).update(arp_all.get(ip, ()), (mac,))
             for key, rec in self._seen.items():
-                rec_ip, rec_mac = rec.get("ip"), rec.get("mac")
-                if rec_ip and rec_mac and not key.startswith("hub:") and rec_ip in owners and rec_mac not in owners[rec_ip]:
+                if address_taken(key, rec, owners):
                     rec.pop("ip", None)
             if changed:
                 self._commit(opts)
@@ -942,7 +941,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         )
         # The pings just refreshed ARP, so it names the MAC behind each reply. A device whose
         # old address now belongs to someone else stays offline instead of borrowing their reply.
-        arp = await self.hass.async_add_executor_job(_read_arp)
+        # ARP can list one address under two MACs at once (a bridge on a second interface, proxy
+        # ARP), so every MAC listed there counts, whichever comes last.
+        arp = await self.hass.async_add_executor_job(_read_arp_all)
         hub_macs = self._hub_macs()
         macs: dict[str, str] = {}
         for key, ip in targets.items():
@@ -952,14 +953,14 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             # Only hold a key to its MAC once ARP has shown that MAC at this address. A hub given its
             # base MAC, or a MAC entered by hand for a device behind a MAC-NAT repeater, never shows
             # up there, and must not be kept offline for it.
-            if arp.get(ip) == mac:
+            if mac in arp.get(ip, ()):
                 self._seen.setdefault(key, {"first_seen": dt_util.utcnow().isoformat()})["arp_ip"] = ip
             if (self._seen.get(key) or {}).get("arp_ip") == ip:
                 macs[key] = mac
         alive: list[tuple[str, str | None]] = []
         for host in results:
             if host.is_alive:
-                for key in keys_answering(by_ip.get(host.address, []), macs, arp.get(host.address)):
+                for key in keys_answering(by_ip.get(host.address, []), macs, arp.get(host.address, ())):
                     alive.append((key, host.address))
         return alive
 
@@ -1287,14 +1288,6 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         if ip:
             rec["ip"] = ip
         return key
-
-
-def _read_arp() -> dict[str, str]:
-    try:
-        with open("/proc/net/arp", encoding="ascii") as fh:
-            return parse_proc_arp(fh.read())
-    except OSError:
-        return {}
 
 
 def _read_arp_all() -> dict[str, list[str]]:

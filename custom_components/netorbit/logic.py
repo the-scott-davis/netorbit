@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import datetime, timedelta
 import ipaddress
 import re
@@ -230,19 +231,33 @@ def parse_proc_arp(text: str) -> dict[str, str]:
     return {ip: macs[-1] for ip, macs in parse_proc_arp_all(text).items()}
 
 
-def keys_answering(keys: list[str], macs: dict[str, str], answered_by: str | None) -> list[str]:
+def keys_answering(keys: list[str], macs: dict[str, str], answered_by: Collection[str]) -> list[str]:
     """Which of the keys pinged at one address the reply belongs to.
 
     DHCP hands a departed device's address to the next one that asks, so a reply proves only
     that something has the address. `macs` holds the MAC each key is held to: only keys whose
     MAC ARP has already shown at this address, so a hub given its base MAC or a device behind a
-    MAC-NAT repeater is never held to a MAC that can't appear. When ARP says which MAC replied,
-    a held key with a different MAC didn't answer. Other keys, and replies ARP can't place,
-    count as before.
+    MAC-NAT repeater is never held to a MAC that can't appear. `answered_by` is every MAC ARP
+    lists at the address: usually one, but a bridge on a second interface or proxy ARP can add
+    another. A held key whose MAC isn't among them didn't answer. Other keys, and replies ARP
+    can't place (no entry), count as before.
     """
     if not answered_by:
         return keys
-    return [k for k in keys if not macs.get(k) or macs[k] == answered_by]
+    return [k for k in keys if not macs.get(k) or macs[k] in answered_by]
+
+
+def address_taken(key: str, rec: dict, owners: dict[str, set[str]]) -> bool:
+    """Whether ARP now shows a device's recorded address only on other MACs.
+
+    `owners` maps each address seen this sweep to every MAC ARP lists there, so a device keeps
+    its address while its own MAC is still among them. Hubs keep the host they were given, and
+    a record with no address or no MAC has nothing to compare.
+    """
+    ip, mac = rec.get("ip"), rec.get("mac")
+    if key.startswith("hub:") or not ip or not mac:
+        return False
+    return ip in owners and mac not in owners[ip]
 
 
 def subnet_hosts(subnet: str) -> list[str]:

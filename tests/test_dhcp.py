@@ -104,7 +104,7 @@ async def test_lookup_by_ip_finds_the_device_that_has_it_now(hass: HomeAssistant
     assert nodes["Device 53:10"].attributes["ip"] is None
 
 
-async def test_device_keeps_its_ip_while_arp_still_lists_its_mac_there(hass: HomeAssistant, fake_net, freezer) -> None:
+async def test_device_keeps_its_ip_and_stays_online_while_arp_still_lists_its_mac_there(hass: HomeAssistant, fake_net, freezer) -> None:
     fake_net.alive = {GATEWAY, "192.0.2.10"}
     fake_net.arp = {"192.0.2.10": TV}
     entry = _entry("auto")
@@ -116,6 +116,13 @@ async def test_device_keeps_its_ip_while_arp_still_lists_its_mac_there(hass: Hom
     fake_net.arp_also = {"192.0.2.10": [TV]}
     await advance(hass, freezer, 301)
     assert _node_states(hass)["Device 53:10"].attributes["ip"] == "192.0.2.10"
+
+    # It still answers pings at that address, so it stays online well past the stale window,
+    # whichever of the two MACs ARP happens to list last.
+    for _ in range(30):
+        await advance(hass, freezer, 3600)
+    tv = _node_states(hass)["Device 53:10"]
+    assert tv.state == "online" and tv.attributes["ip"] == "192.0.2.10"
 
 
 async def test_device_added_by_ip_switches_to_its_mac(hass: HomeAssistant, fake_net, freezer) -> None:

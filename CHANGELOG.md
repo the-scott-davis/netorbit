@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A device stays online while ARP lists its address under another MAC too** (#98). When ARP shows one address under two MACs at once (a bridge on a second interface, a container host, proxy ARP), the ping check now credits the reply to every MAC listed there. Before, it went by the last one, so a device listed first kept its address but got no credit for its replies and went stale after a day.
+
 ## 0.4.0b1
 
 ### Added
