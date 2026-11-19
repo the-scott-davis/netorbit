@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+- **A device stays online while ARP lists its address under another MAC too** (#98). When ARP shows one address under two MACs at once (a bridge on a second interface, a container host, proxy ARP), the ping check now credits the reply to every MAC listed there. Before, it went by the last one, so a device listed first kept its address but got no credit for its replies and went stale after a day.
+
+## 0.4.0b1
+
 ### Added
 - **Tap a hub or device for its details.** Outside Edit layout, a tap opens a NetOrbit popup with the DNS name, IP, MAC, maker, the hub it connects through and how it was placed, when it was first and last seen, and any text you attached to it. *More info* still opens Home Assistant's own dialog. Admins get *Edit* there to change the name, *Managed by* and the extra fields.
 - **Managed by and extra fields.** Every hub and device can carry a *Managed by* line (a link, or the name of another hub or device on the map, which the popup then jumps to) and up to 20 extra fields (`Label: value`). Set them from the details popup, the integration's *Edit* forms, the new `netorbit.update_device` service, `netorbit.update_hub`, or an AI assistant. Exports include them, and an import checks them the same way (anything that fails is left out and counted).
@@ -15,7 +20,6 @@
 - **A popup left open no longer freezes the map.** The map didn't redraw while a popup was open, so one left open (on a wall panel, say) stopped all updates until someone closed it. The details popup now updates along with the map, and every popup closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
 - A tooltip shown on a map redrawn under the mouse now appears next to the pointer, not in the corner of the card (thanks @ninchistudios, #66).
 - **A lookup by IP finds the device that has the address now.** When DHCP gives a departed device's address to another device, services and assistant tools given that address no longer act on the departed one, and its sensor no longer shows the address (follow-up to #47). A device keeps its address while ARP still lists its MAC there, even when ARP lists another MAC for it too (a bridge on a second interface, say). This also takes offline a device that had already left before the upgrade to 0.3.0, unless it was tracked by hand with an IP (#65).
-- **A device stays online while ARP lists its address under another MAC too** (#98). When ARP shows one address under two MACs at once (a bridge on a second interface, a container host, proxy ARP), the ping check now credits the reply to every MAC listed there. Before, it went by the last one, so a device listed first kept its address but got no credit for its replies and went stale after a day.
 - **Home Assistant 2026.11: router clients no longer turn into hubs or lose their names.** From 2026.11, UniFi, Nmap and other router integrations give each client's tracker a device of its own, named after an alias, a hostname or the maker plus part of the MAC. NetOrbit no longer takes such a device for network gear (a client called "Hallway Switch" was added as a switch) or lets its name replace the one NetOrbit found; a name you give the device yourself still counts, and its maker and model are kept. A tracker that is on no longer passes on a name made of a maker and the end of a MAC either (how Nmap names a client without a hostname, "Acme 00:53:0C"). These integrations also add new client trackers turned off now, and NetOrbit reads names and access points only from trackers that are on.
 
 ## 0.3.1
