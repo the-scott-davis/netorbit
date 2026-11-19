@@ -1258,6 +1258,11 @@ class NetOrbitCard extends HTMLElement {
     this._edit = false;
     this._view = null; // the part of the map on show; null is the whole map
     this._focus = null; // the hub whose branch is on show on its own (long-press a hub); null is the whole map
+    // A new config may point at other sensors: forget the last map, so it is never kept up as theirs.
+    this._model_ = null;
+    this._full = null;
+    this._shown = null;
+    this._lastGood = 0;
     // A new config starts again from its own `layout`; a pick in the header is saved for this card only.
     this._layoutOverride = null;
     this._layoutKey = noLayoutKey(config, typeof location !== "undefined" ? location.pathname : "");
@@ -1321,10 +1326,21 @@ class NetOrbitCard extends HTMLElement {
     if (this._zooming && Date.now() - this._zooming < 15000) { this._held = true; return; }
     this._held = false;
     const model = this._model();
-    // The sensors went unavailable (updates failed several times in a row, the integration is reloading, Home
-    // Assistant is starting): keep the last map on screen and say so, rather than "No NetOrbit sensors found".
-    // The next update with data redraws everything, which drops the note.
-    if (!model.root && this._model_ && this._mode !== "takeover") { this._sig = ""; this._showOffline(); return; }
+    // The card's sensors are still there but unavailable (a third failed round in a row, the integration is
+    // reloading, Home Assistant is starting): keep the last map on screen with a note, rather than "No NetOrbit
+    // sensors found". Edit layout needs NetOrbit, so it ends and its button waits; a change of layout or branch
+    // redraws the last map. The next update with data redraws everything, which drops the note.
+    if (!model.root && this._full && this._full.root && this._mode !== "takeover" && this._offline()) {
+      this._sig = "";
+      this._edit = false;
+      const shown = JSON.stringify([this._edit, this._layoutName(), this._focus]);
+      if (shown !== this._shown) {
+        this._shown = shown;
+        this._render(this._focus ? netorbitFocus(this._full, this._focus) : this._full, this._mode);
+      }
+      this._showOffline();
+      return;
+    }
     if (model.root) this._lastGood = Date.now();
     const mode = netorbitScanMode(model.summary && model.summary.attributes);
     if (mode === "takeover") {
@@ -1348,6 +1364,7 @@ class NetOrbitCard extends HTMLElement {
     this._mode = mode;
     if (reveal) { this._view = null; this._focus = null; }
     const live = this._popOpen ? this._detailsState() : null;
+    this._shown = JSON.stringify([this._edit, this._layoutName(), this._focus]);
     this._render(this._focus ? netorbitFocus(model, this._focus) : model, reveal ? "reveal" : mode);
     if (live) this._reopenDetails(live);
     if (reveal) this._playReveal();
@@ -1355,6 +1372,19 @@ class NetOrbitCard extends HTMLElement {
 
   _isAdmin() {
     return !!(this._hass && this._hass.user && this._hass.user.is_admin);
+  }
+
+  // The card's NetOrbit sensors are registered but unavailable. Home Assistant drops an unavailable sensor's
+  // attributes, so _entities() loses it just as if it had been deleted; the entity registry tells the two apart.
+  // Removed sensors, a removed integration or a card now pointed at other sensors are not offline.
+  _offline() {
+    const hass = this._hass;
+    const cfg = this._config;
+    const reg = hass.entities || {};
+    return Object.keys(reg).some((e) => e.startsWith("sensor.") && reg[e].platform === "netorbit"
+      && (!cfg.entities || cfg.entities.includes(e))
+      && (!cfg.device_id || reg[e].device_id === cfg.device_id)
+      && (hass.states[e] || {}).state === "unavailable");
   }
 
   _entities() {
@@ -1548,6 +1578,7 @@ class NetOrbitCard extends HTMLElement {
   .chip.sug { border-color:rgba(244,114,182,.5); color:#f9a8d4; }
   .editbtn { font:inherit; font-size:12.5px; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; border:1px solid rgba(96,165,250,.45); background:transparent; color:#bfdbfe; cursor:pointer; }
   .editbtn.on { background:#2563eb; border-color:#2563eb; color:#fff; }
+  .editbtn:disabled { opacity:.45; cursor:default; }
   .editbtn ha-icon { --mdc-icon-size:16px; }
   .banner { margin:6px 18px 0; padding:8px 12px; border-radius:8px; background:rgba(37,99,235,.15); border:1px solid rgba(96,165,250,.35); font-size:13px; color:#dbeafe; }
   .banner.offline { background:rgba(251,191,36,.12); border-color:rgba(251,191,36,.45); color:#fde68a; }
@@ -2595,11 +2626,13 @@ class NetOrbitCard extends HTMLElement {
     else this.hass = this._hass;
   }
 
-  // A note under the header while NetOrbit's sensors are unavailable.
+  // A note under the header while NetOrbit's sensors are unavailable. Edit layout waits until NetOrbit is back.
   _showOffline() {
     const card = this.shadowRoot.querySelector("ha-card");
     const head = card && card.querySelector(".head");
     if (!head || card.querySelector(".banner.offline")) return;
+    const edit = card.querySelector(".editbtn");
+    if (edit) { edit.disabled = true; edit.title = "Edit layout works again when NetOrbit is back"; }
     const since = this._lastGood ? new Date(this._lastGood).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const note = document.createElement("div");
     note.className = "banner offline";

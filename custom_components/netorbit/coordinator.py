@@ -97,7 +97,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PING_COUNT = 2
 PING_TIMEOUT = 1.5
-ROUND_FAILURES = 3  # rounds in a row that may fail on a network error before the sensors go unavailable
+# The failed round in a row (network error) that makes the sensors unavailable; the rounds before it keep the last map.
+UNAVAILABLE_ON_FAILED_ROUND = 3
 SWEEP_TIMEOUT = 1.0
 DNS_TIMEOUT = 2.0
 DNS_REFRESH = timedelta(hours=12)
@@ -343,7 +344,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             # One failed round (a moment without a route, a busy socket) must not make every sensor
             # unavailable and blank the map: keep the last map for a couple of rounds, then report it.
             self._failed_rounds += 1
-            if self.data is not None and self._failed_rounds < ROUND_FAILURES:
+            if self.data is not None and self._failed_rounds < UNAVAILABLE_ON_FAILED_ROUND:
                 _LOGGER.warning("NetOrbit: a round failed (%s), keeping the last map", err)
                 return self.data
             raise UpdateFailed(f"Network error: {err}") from err

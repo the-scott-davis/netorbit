@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **One failed refresh no longer blanks the map.** A refresh that hits a network error (a moment without a route, a busy socket) keeps the last map for up to two refreshes in a row; only the third makes the sensors unavailable. While the card's sensors are unavailable, it keeps the last map with a note saying when NetOrbit last sent an update, instead of "No NetOrbit sensors found", and Edit layout waits until NetOrbit is back. A card whose sensors were removed, or that now points at other sensors, still says "No NetOrbit sensors found".
+
 ## 0.4.0b1
 
 ### Added
@@ -16,7 +21,6 @@
 - A tooltip shown on a map redrawn under the mouse now appears next to the pointer, not in the corner of the card (thanks @ninchistudios, #66).
 - **A lookup by IP finds the device that has the address now.** When DHCP gives a departed device's address to another device, services and assistant tools given that address no longer act on the departed one, and its sensor no longer shows the address (follow-up to #47). A device keeps its address while ARP still lists its MAC there, even when ARP lists another MAC for it too (a bridge on a second interface, say). This also takes offline a device that had already left before the upgrade to 0.3.0, unless it was tracked by hand with an IP (#65).
 - **Home Assistant 2026.11: router clients no longer turn into hubs or lose their names.** From 2026.11, UniFi, Nmap and other router integrations give each client's tracker a device of its own, named after an alias, a hostname or the maker plus part of the MAC. NetOrbit no longer takes such a device for network gear (a client called "Hallway Switch" was added as a switch) or lets its name replace the one NetOrbit found; a name you give the device yourself still counts, and its maker and model are kept. A tracker that is on no longer passes on a name made of a maker and the end of a MAC either (how Nmap names a client without a hostname, "Acme 00:53:0C"). These integrations also add new client trackers turned off now, and NetOrbit reads names and access points only from trackers that are on.
-- **One failed refresh no longer blanks the map.** A refresh that hits a network error (a moment without a route, a busy socket) keeps the last map for up to two refreshes in a row; only the third makes the sensors unavailable. When the sensors do go unavailable, the card keeps the last map with a note saying when NetOrbit last sent an update, instead of "No NetOrbit sensors found".
 
 ## 0.3.1
 
